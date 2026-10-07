@@ -218,22 +218,25 @@ def check_for_updates(timeout: float = 3.0) -> Dict[str, Any]:
         latest_v = result["latest_version"]
 
         # Check if disk has newer version than running process (Pending Restart)
-        if (installed_commit != "unknown" and running_commit != "unknown" and installed_commit != running_commit) or (
+        is_known_installed = installed_commit and installed_commit.lower() not in ("unknown", "installed")
+        is_known_running = running_commit and running_commit.lower() not in ("unknown", "installed")
+
+        if (is_known_installed and is_known_running and installed_commit != running_commit) or (
             _parse_version_tuple(installed_ver) > _parse_version_tuple(running_ver)
         ):
             result["restart_required"] = True
 
         # Check if GitHub has newer version than installed on disk
         if latest_sha:
-            if installed_commit != "unknown":
+            if is_known_installed:
                 if installed_commit.lower() != latest_sha.lower():
                     result["update_available"] = True
             else:
-                # Fallback to semantic version comparison if commit SHA unavailable
+                # When running as an installed package without git commit info, compare semantic versions
                 if _parse_version_tuple(latest_v) > _parse_version_tuple(installed_ver):
                     result["update_available"] = True
-                elif _parse_version_tuple(latest_v) == _parse_version_tuple(installed_ver):
-                    # Same version, commit unknown -> assume up to date to prevent infinite loop
+                else:
+                    # Same or higher version -> Up to date!
                     result["update_available"] = False
         else:
             # Could not fetch commit, compare versions
