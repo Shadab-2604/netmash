@@ -275,6 +275,28 @@ class NetMashClient:
         resp = await self._send_and_wait(msg, MessageType.GROUP_INFO_RESPONSE)
         return resp.payload if resp else None
 
+    async def set_group_pin(
+        self, name: str, pin: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Updates or removes the PIN for a group (owner only)."""
+        msg = NetMashMessage(
+            type=MessageType.GROUP_SET_PIN,
+            payload={"name": name, "pin": pin},
+        )
+        resp = await self._send_and_wait(msg, MessageType.GROUP_SET_PIN_RESPONSE)
+        return resp.payload if resp else None
+
+    async def switch_room(self, room: str) -> Optional[Dict[str, Any]]:
+        """Switches active viewing room without re-entering PIN if already a member."""
+        msg = NetMashMessage(
+            type=MessageType.ROOM_SWITCH,
+            payload={"room": room},
+        )
+        resp = await self._send_and_wait(msg, MessageType.ROOM_SWITCH_RESPONSE)
+        if resp and resp.payload.get("success"):
+            self.current_room = resp.payload.get("room", room).lower().strip()
+        return resp.payload if resp else None
+
     async def list_peers(self) -> List[Dict[str, Any]]:
         """Requests active peer list."""
         msg = NetMashMessage(type=MessageType.PEER_LIST, payload={})

@@ -37,22 +37,40 @@ def test_cli_parser_flags():
 def test_cli_parser_subcommands():
     parser = build_parser()
 
-    # group create
+    # group create with --pin flag (prompt)
     args = parser.parse_args(["group", "create", "developers", "--pin"])
     assert args.subcommand == "group"
     assert args.group_action == "create"
     assert args.group_name == "developers"
-    assert args.pin is True
+    assert args.pin == "PROMPT"
+
+    # group create with explicit PIN
+    args = parser.parse_args(["group", "create", "developers", "--pin", "1234"])
+    assert args.pin == "1234"
 
     # group list
     args = parser.parse_args(["group", "list"])
     assert args.subcommand == "group"
     assert args.group_action == "list"
 
-    # group join
-    args = parser.parse_args(["group", "join", "developers"])
+    # group join with explicit PIN
+    args = parser.parse_args(["group", "join", "developers", "--pin", "1234"])
     assert args.subcommand == "group"
     assert args.group_action == "join"
+    assert args.group_name == "developers"
+    assert args.pin == "1234"
+
+    # group set-pin
+    args = parser.parse_args(["group", "set-pin", "developers", "9999"])
+    assert args.subcommand == "group"
+    assert args.group_action == "set-pin"
+    assert args.group_name == "developers"
+    assert args.pin == "9999"
+
+    # group remove-pin
+    args = parser.parse_args(["group", "remove-pin", "developers"])
+    assert args.subcommand == "group"
+    assert args.group_action == "remove-pin"
     assert args.group_name == "developers"
 
     # dm

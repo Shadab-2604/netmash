@@ -120,19 +120,24 @@ def render_status(status: Dict[str, Any]) -> None:
 def print_help() -> None:
     """Prints interactive chat commands."""
     print(bold("\nInteractive Commands:"))
-    print(f"  {cyan('/help')}                 Show this help message")
-    print(f"  {cyan('/users')}, {cyan('/peers')}        List connected peers")
-    print(f"  {cyan('/groups')}               List available groups")
-    print(f"  {cyan('/create <name>')}        Create a new public or PIN group")
-    print(f"  {cyan('/join <name>')}          Switch room or join a group")
-    print(f"  {cyan('/leave')}                Leave current group and return to GENERAL")
-    print(f"  {cyan('/dm <user> [msg]')}      Direct message a peer")
-    print(f"  {cyan('/room')}                 Show current active room")
-    print(f"  {cyan('/name <new_name>')}      Change your display name")
-    print(f"  {cyan('/info')}                 Show local node and network info")
-    print(f"  {cyan('/status')}               Show server status")
-    print(f"  {cyan('/clear')}                Clear terminal screen")
-    print(f"  {cyan('/exit')}, {cyan('/quit')}        Disconnect and exit")
+    print(f"  {cyan('/help')}                    Show this help message")
+    print(f"  {cyan('/users')}, {cyan('/peers')}           List connected peers")
+    print(f"  {cyan('/groups')}                  List all available groups")
+    print(f"  {cyan('/create <name> [pin]')}     Create a new group (public or PIN-protected)")
+    print(f"  {cyan('/create-pin <name> <pin>')} Quick-create a 4-digit PIN protected group")
+    print(f"  {cyan('/join <name> [pin]')}       Join a group (or switch to it)")
+    print(f"  {cyan('/switch <name>')}           Switch active room (e.g. /switch general or /switch dev)")
+    print(f"  {cyan('/general')}                 Quick jump back to GENERAL room")
+    print(f"  {cyan('/leave [name]')}            Leave group and return to GENERAL")
+    print(f"  {cyan('/setpin <name> [pin]')}     Set or update 4-digit PIN for your group (owner only)")
+    print(f"  {cyan('/removepin <name>')}        Remove PIN and make group public (owner only)")
+    print(f"  {cyan('/dm <user> [msg]')}         Direct message a peer")
+    print(f"  {cyan('/room')}                    Show current active room")
+    print(f"  {cyan('/name <new_name>')}         Change your display name")
+    print(f"  {cyan('/info')}                    Show local node and network info")
+    print(f"  {cyan('/status')}                  Show server status")
+    print(f"  {cyan('/clear')}                   Clear terminal screen")
+    print(f"  {cyan('/exit')}, {cyan('/quit')}           Disconnect and exit")
     print()
 
 
@@ -240,8 +245,9 @@ async def run_interactive_chat(client: NetMashClient) -> None:
 
             if text.startswith("/"):
                 # Handle slash commands
-                parts = text.split(" ", 2)
-                cmd = parts[0].lower()
+                raw_parts = text.split(" ")
+                cmd = raw_parts[0].lower()
+                cmd_args = [p for p in raw_parts[1:] if p]
 
                 if cmd in ("/exit", "/quit"):
                     print(yellow("\nDisconnecting from NetMash..."))
@@ -254,40 +260,72 @@ async def run_interactive_chat(client: NetMashClient) -> None:
                 elif cmd == "/groups":
                     groups = await client.list_groups()
                     render_groups_table(groups)
-                elif cmd == "/create":
-                    if len(parts) < 2:
-                        print(red("Usage: /create <group_name>"))
+                elif cmd in ("/create", "/creategroup"):
+                    if not cmd_args:
+                        print(red("Usage: /create <group_name> [4-digit-pin]"))
                     else:
-                        group_name = parts[1].strip()
-                        print(f"Creating group: {cyan(group_name)}")
-                        print("1. Public")
-                        print("2. PIN protected")
-                        choice = await asyncio.to_thread(input, "Select (1/2): ")
-                        pin = None
-                        if choice.strip() == "2":
-                            pin1 = await asyncio.to_thread(input, "Enter 4-digit PIN: ")
-                            pin2 = await asyncio.to_thread(input, "Confirm PIN: ")
-                            if pin1 != pin2:
-                                print(red("PINs do not match. Cancelled."))
-                                continue
-                            pin = pin1.strip()
+                        group_name = cmd_args[0].strip()
+                        pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+                        if pin is None:
+                            print(f"Creating group: {cyan(group_name)}")
+                            print("1. Public")
+                            print("2. PIN protected")
+                            choice = await asyncio.to_thread(input, "Select (1/2): ")
+                            if choice.strip() == "2":
+                                pin1 = await asyncio.to_thread(input, "Enter 4-digit PIN: ")
+                                pin2 = await asyncio.to_thread(input, "Confirm PIN: ")
+                                if pin1 != pin2:
+                                    print(red("PINs do not match. Cancelled."))
+                                    continue
+                                pin = pin1.strip()
 
                         resp = await client.create_group(group_name, pin=pin)
                         if resp and resp.get("success"):
-                            print(green(f"✓ Group '{resp.get('name')}' created successfully."))
+                            print(green(f"✓ Group '{resp.get('name')}' created successfully (Access: {resp.get('access')})."))
                             client.current_room = resp.get("name", group_name)
-                            print(dim(f"Switched room to: {client.current_room.upper()}"))
+                            print(bright_cyan(f"Active room switched to: {client.current_room.upper()}"))
                         elif resp:
                             print(yellow(f"{resp.get('message')}"))
                         else:
                             print(red("Failed to create group."))
-                elif cmd == "/join":
-                    if len(parts) < 2:
-                        print(red("Usage: /join <group_name>"))
+                elif cmd in ("/create-pin", "/createpin"):
+                    if len(cmd_args) < 2:
+                        print(red("Usage: /create-pin <group_name> <4-digit-pin>"))
                     else:
-                        target_group = parts[1].strip()
-                        resp = await client.join_group(target_group)
-                        if resp and resp.get("requires_pin"):
+                        group_name = cmd_args[0].strip()
+                        pin = cmd_args[1].strip()
+                        resp = await client.create_group(group_name, pin=pin)
+                        if resp and resp.get("success"):
+                            print(green(f"✓ PIN group '{resp.get('name')}' created successfully."))
+                            client.current_room = resp.get("name", group_name)
+                            print(bright_cyan(f"Active room switched to: {client.current_room.upper()}"))
+                        elif resp:
+                            print(yellow(f"{resp.get('message')}"))
+                        else:
+                            print(red("Failed to create PIN group."))
+                elif cmd in ("/join", "/switch"):
+                    if not cmd_args:
+                        print(red("Usage: /join <group_name> [4-digit-pin] or /switch <group_name>"))
+                    else:
+                        target_group = cmd_args[0].strip()
+                        pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+
+                        # If switching to general
+                        if target_group.lower() == "general":
+                            resp = await client.switch_room("general")
+                            if resp and resp.get("success"):
+                                print(green("✓ Switched to GENERAL room."))
+                            continue
+
+                        # Try room switch first (in case already a member)
+                        switch_resp = await client.switch_room(target_group)
+                        if switch_resp and switch_resp.get("success"):
+                            print(green(f"✓ Switched to room '{target_group}'. Current room: {client.current_room.upper()}"))
+                            continue
+
+                        # Otherwise try join
+                        resp = await client.join_group(target_group, pin=pin)
+                        if resp and resp.get("requires_pin") and pin is None:
                             pin_input = await asyncio.to_thread(
                                 input, f"Group '{target_group}' requires a PIN. Enter 4-digit PIN: "
                             )
@@ -299,22 +337,56 @@ async def run_interactive_chat(client: NetMashClient) -> None:
                             print(red(f"✗ {resp.get('message')}"))
                         else:
                             print(red(f"✗ Could not join group '{target_group}'."))
+                elif cmd == "/general":
+                    resp = await client.switch_room("general")
+                    if resp and resp.get("success"):
+                        print(green("✓ Returned to GENERAL room."))
+                    else:
+                        print(red("Could not switch to GENERAL."))
+                elif cmd == "/setpin":
+                    if not cmd_args:
+                        print(red("Usage: /setpin <group_name> [new-4-digit-pin]"))
+                    else:
+                        group_name = cmd_args[0].strip()
+                        new_pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+                        if new_pin is None:
+                            new_pin = await asyncio.to_thread(input, f"Enter new 4-digit PIN for '{group_name}': ")
+                        resp = await client.set_group_pin(group_name, pin=new_pin.strip())
+                        if resp and resp.get("success"):
+                            print(green(f"✓ {resp.get('message')}"))
+                        elif resp:
+                            print(red(f"✗ {resp.get('message')}"))
+                        else:
+                            print(red("Failed to set group PIN."))
+                elif cmd == "/removepin":
+                    if not cmd_args:
+                        print(red("Usage: /removepin <group_name>"))
+                    else:
+                        group_name = cmd_args[0].strip()
+                        resp = await client.set_group_pin(group_name, pin=None)
+                        if resp and resp.get("success"):
+                            print(green(f"✓ {resp.get('message')}"))
+                        elif resp:
+                            print(red(f"✗ {resp.get('message')}"))
+                        else:
+                            print(red("Failed to remove group PIN."))
                 elif cmd == "/leave":
-                    if client.current_room == "general":
+                    target_group = cmd_args[0].strip() if cmd_args else client.current_room
+                    if target_group.lower() == "general":
                         print(yellow("You are already in GENERAL."))
                     else:
-                        resp = await client.leave_group(client.current_room)
+                        resp = await client.leave_group(target_group)
                         if resp and resp.get("success"):
-                            print(green(f"✓ Left group. Returned to GENERAL."))
+                            print(green(f"✓ Left '{target_group}'. Returned to GENERAL."))
                         elif resp:
                             print(red(f"✗ {resp.get('message')}"))
                 elif cmd == "/dm":
-                    if len(parts) < 2:
+                    if not cmd_args:
                         print(red("Usage: /dm <username> [message]"))
                     else:
-                        target_user = parts[1].strip()
-                        if len(parts) == 3:
-                            dm_content = parts[2].strip()
+                        target_user = cmd_args[0].strip()
+                        if len(cmd_args) > 1:
+                            dm_content = " ".join(cmd_args[1:]).strip()
                             await client.send_dm(target_user, dm_content)
                         else:
                             dm_content = await asyncio.to_thread(
@@ -323,12 +395,12 @@ async def run_interactive_chat(client: NetMashClient) -> None:
                             if dm_content.strip():
                                 await client.send_dm(target_user, dm_content.strip())
                 elif cmd == "/room":
-                    print(f"Current room: {cyan(client.current_room.upper())}")
+                    print(f"Current active room: {bright_cyan(client.current_room.upper())}")
                 elif cmd == "/name":
-                    if len(parts) < 2:
+                    if not cmd_args:
                         print(red("Usage: /name <new_name>"))
                     else:
-                        new_name = parts[1].strip()
+                        new_name = cmd_args[0].strip()
                         await client.change_name(new_name)
                         print(green(f"✓ Name change requested: {new_name}"))
                 elif cmd == "/info":
@@ -346,8 +418,8 @@ async def run_interactive_chat(client: NetMashClient) -> None:
                 else:
                     print(yellow("Unknown command. Use /help to see available commands."))
             else:
-                # Regular chat message
-                await client.send_chat(text)
+                # Regular chat message sent strictly to current_room
+                await client.send_chat(text, room=client.current_room)
 
         except (KeyboardInterrupt, asyncio.CancelledError):
             print(yellow("\nDisconnecting from NetMash..."))

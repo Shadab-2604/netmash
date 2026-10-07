@@ -24,10 +24,12 @@ When you run `netmash`, it automatically searches your reachable Wi-Fi or Ethern
 
 - **Zero-Config Automatic Peer Discovery**: Uses UDP multicast (`239.255.77.88:8766`) with automatic broadcast (`255.255.255.255:8766`) fallback.
 - **Host / Client Architecture**: First node becomes host, subsequent nodes connect as clients.
-- **Shared GENERAL Room**: Instant public chat room for all connected peers.
-- **Custom Groups**:
+- **Strict Room Isolation**: Users in a room (e.g. `security` or `developers`) receive messages solely for their active room and cannot see `GENERAL` or other group chats. Users in `GENERAL` cannot see private or group chats.
+- **Custom Groups & PIN Protection**:
   - Public groups for open discussions.
-  - PIN-protected groups secured by 4-digit PINs.
+  - PIN-protected groups secured by 4-digit PINs (scrypt hashed).
+  - Quick room switching (`/switch <name>`, `/general`).
+  - Owner PIN management (`/setpin`, `/removepin`).
 - **Direct Messaging (DM)**: Private peer-to-peer messaging via `/dm <user>` or `netmash dm <user>`.
 - **Peer & Node Inspection**: View online peers, host status, and network information with `-n`, `-s`, and `-i`.
 - **Security by Design**:
@@ -53,21 +55,15 @@ When you run `netmash`, it automatically searches your reachable Wi-Fi or Ethern
                              │
                       NetMash Host
                              │
-                     TCP Stream (8765)
+                      TCP Stream (8765)
                              │
         ┌────────────────────┼────────────────────┐
         │                    │                    │
      Client A             Client B             Client C
+   (in GENERAL)        (in GROUP DEV)       (in GROUP SEC)
         │                    │                    │
-        └────────────────────┼────────────────────┘
-                             │
-                        Chat Engine
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-     GENERAL             GROUP DEV            GROUP SEC
-                             │                    │
-                          Public             PIN Protected
+        ▼                    ▼                    ▼
+ [GENERAL Chat Only]   [DEV Chat Only]      [SEC Chat Only]
 ```
 
 ---
@@ -191,7 +187,15 @@ netmash --no-color
 
 ---
 
-## 7. Group Commands
+## 7. Group & PIN Management
+
+### Strict Room Isolation
+
+When you are in a specific room (such as a private group `security`), all conversations in that room are strictly isolated:
+- You will **only** receive and send messages in your active room.
+- You will **not** receive chats sent in `GENERAL` or any other group.
+- Users in `GENERAL` or other groups cannot view your group messages.
+- You can switch between groups or return to `GENERAL` at any time with `/switch` or `/general`.
 
 ### From the CLI
 
@@ -205,6 +209,49 @@ netmash group create developers
 
 # Create a PIN-protected group (prompts interactively for 4-digit PIN)
 netmash group create security --pin
+
+# Create a PIN-protected group with direct PIN
+netmash group create security --pin 1234
+
+# Join a group directly
+netmash group join developers
+netmash group join security --pin 1234
+
+# Change or set a PIN (group owner only)
+netmash group set-pin security 5678
+
+# Remove PIN protection (group owner only)
+netmash group remove-pin security
+
+# Leave a group
+netmash group leave developers
+
+# View group details
+netmash group info developers
+```
+
+### Inside Interactive Chat
+
+```text
+/help                    Show help commands
+/users, /peers           List online peers
+/groups                  List available groups
+/create <name>           Create a public or PIN-protected group
+/create-pin [name] [pin] Create a PIN-protected group directly
+/join <name> [pin]       Join or switch to a group room
+/switch <name>           Switch active room between joined groups or GENERAL
+/general                 Instantly switch back to GENERAL room
+/leave                   Leave current group and return to GENERAL
+/setpin <name> <new_pin> Set or change group PIN (owner only)
+/removepin <name>        Remove PIN protection from group (owner only)
+/dm <user> [msg]         Send a direct message
+/room                    Show current active room name
+/name <new_name>         Change your display name
+/info                    Display network and node info
+/status                  Display server uptime and metrics
+/clear                   Clear terminal screen
+/exit, /quit             Disconnect and exit
+```eate security --pin
 
 # Join a group directly
 netmash group join developers

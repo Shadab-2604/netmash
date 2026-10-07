@@ -139,6 +139,41 @@ class GroupManager:
         logger.info("User %s left group %s", node_id, norm_name)
         return True, f"You left '{norm_name}'."
 
+    def set_group_pin(
+        self, name: str, requester_node_id: str, new_pin: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Updates or removes the 4-digit PIN for a group. Only the group owner can set or modify the PIN.
+        """
+        norm_name = name.strip().lower()
+        if norm_name == "general":
+            return False, "The GENERAL room cannot be PIN protected."
+
+        group = self.db.get_group(norm_name)
+        if not group:
+            return False, f"Group '{norm_name}' does not exist."
+
+        if group.get("owner_id") != requester_node_id:
+            return False, "Only the group creator/owner can modify the PIN."
+
+        if new_pin:
+            is_valid, valid_pin, err = validate_pin(new_pin)
+            if not is_valid:
+                return False, err
+            pin_hash = hash_pin(valid_pin)
+            updated = self.db.update_group_pin(norm_name, pin_hash)
+            if updated:
+                logger.info("Group %s PIN updated by owner %s", norm_name, requester_node_id)
+                return True, f"PIN set for group '{norm_name}'."
+            return False, "Failed to update group PIN."
+        else:
+            # Remove PIN (make public)
+            updated = self.db.update_group_pin(norm_name, None)
+            if updated:
+                logger.info("Group %s PIN removed by owner %s", norm_name, requester_node_id)
+                return True, f"Group '{norm_name}' is now public (PIN removed)."
+            return False, "Failed to remove group PIN."
+
     def remove_peer_from_all_groups(self, node_id: str) -> None:
         """Called when a client disconnects; clears all active online memberships."""
         for group_name in list(self._online_members.keys()):

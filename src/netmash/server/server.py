@@ -59,6 +59,7 @@ class ClientSession:
     hostname: str = ""
     authenticated: bool = False
     joined_groups: Set[str] = field(default_factory=lambda: {"general"})
+    active_room: str = "general"
     last_active: float = field(default_factory=time.monotonic)
 
     async def send_message(self, msg: NetMashMessage) -> None:
@@ -226,6 +227,10 @@ class NetMashServer:
             await self._handle_group_leave(session, payload)
         elif msg_type == MessageType.GROUP_INFO:
             await self._handle_group_info(session, payload)
+        elif msg_type == MessageType.GROUP_SET_PIN:
+            await self._handle_group_set_pin(session, payload)
+        elif msg_type == MessageType.ROOM_SWITCH:
+            await self._handle_room_switch(session, payload)
         elif msg_type == MessageType.PEER_LIST:
             await self._handle_peer_list(session)
         elif msg_type == MessageType.NAME_CHANGE:
@@ -343,14 +348,10 @@ class NetMashServer:
             message_id=entry.message_id,
         )
 
-        # Broadcast to room members
-        if raw_room == "general":
-            await self._broadcast(outgoing)
-        else:
-            online_members = self.group_manager.get_online_members(raw_room)
-            for member_node_id in online_members:
-                target_session = self.sessions.get(member_node_id)
-                if target_session:
+        # Broadcast strictly to room members who are currently in this active_room
+        for target_session in list(self.sessions.values()):
+            if target_session.active_room.lower() == raw_room:
+                if raw_room == "general" or self.group_manager.is_member(raw_room, target_session.node_id):
                     await target_session.send_message(outgoing)
 
     async def _handle_dm(
@@ -409,7 +410,9 @@ class NetMashServer:
         )
 
         if success:
-            session.joined_groups.add(details["name"])
+            norm_name = details["name"]
+            session.joined_groups.add(norm_name)
+            session.active_room = norm_name
 
         resp = NetMashMessage(
             type=MessageType.GROUP_CREATE_RESPONSE,
@@ -445,7 +448,9 @@ class NetMashServer:
         )
 
         if success:
-            session.joined_groups.add(name.lower().strip())
+            norm_name = name.lower().strip()
+            session.joined_groups.add(norm_name)
+            session.active_room = norm_name
 
         resp = NetMashMessage(
             type=MessageType.GROUP_JOIN_RESPONSE,
@@ -462,9 +467,12 @@ class NetMashServer:
         self, session: ClientSession, payload: Dict[str, Any]
     ) -> None:
         name = str(payload.get("name", ""))
-        success, msg = self.group_manager.leave_group(name, session.node_id)
+        norm_name = name.lower().strip()
+        success, msg = self.group_manager.leave_group(norm_name, session.node_id)
         if success:
-            session.joined_groups.discard(name.lower().strip())
+            session.joined_groups.discard(norm_name)
+            if session.active_room.lower() == norm_name:
+                session.active_room = "general"
 
         resp = NetMashMessage(
             type=MessageType.GROUP_LEAVE_RESPONSE,
@@ -473,6 +481,43 @@ class NetMashServer:
                 "success": success,
                 "message": msg,
             },
+        )
+        await session.send_message(resp)
+
+    async def _handle_room_switch(
+        self, session: ClientSession, payload: Dict[str, Any]
+    ) -> None:
+        target_room = str(payload.get("room", "general")).strip().lower()
+        if target_room == "general":
+            session.active_room = "general"
+            resp = NetMashMessage(
+                type=MessageType.ROOM_SWITCH_RESPONSE,
+                payload={"success": True, "room": "general", "message": "Switched to GENERAL room."},
+            )
+        elif not self.group_manager.is_member(target_room, session.node_id):
+            resp = NetMashMessage(
+                type=MessageType.ROOM_SWITCH_RESPONSE,
+                payload={"success": False, "room": target_room, "message": f"You must join group '{target_room}' first."},
+            )
+        else:
+            session.active_room = target_room
+            resp = NetMashMessage(
+                type=MessageType.ROOM_SWITCH_RESPONSE,
+                payload={"success": True, "room": target_room, "message": f"Switched to room '{target_room}'."},
+            )
+        await session.send_message(resp)
+
+    async def _handle_group_set_pin(
+        self, session: ClientSession, payload: Dict[str, Any]
+    ) -> None:
+        name = str(payload.get("name", "")).strip()
+        pin = payload.get("pin")
+        if pin is not None:
+            pin = str(pin).strip()
+        success, msg = self.group_manager.set_group_pin(name, session.node_id, pin)
+        resp = NetMashMessage(
+            type=MessageType.GROUP_SET_PIN_RESPONSE,
+            payload={"name": name, "success": success, "message": msg},
         )
         await session.send_message(resp)
 

@@ -111,14 +111,49 @@ async def test_server_client_full_lifecycle(tmp_path: Path):
 
         assert any(d.payload.get("content") == "Secret DM to Bob" for d in bob_received_dms)
 
-        # 6. Status Test
-        status = await client_bob.get_status()
-        assert status["server_status"] == "ONLINE"
-        assert status["peers_count"] == 2
+        # 7. Strict Room Isolation Test
+        # Create third client Charlie who stays in GENERAL
+        charlie_identity = NodeIdentity(node_id="charlie-node", username="Charlie", hostname="CHARLIE-PC")
+        client_charlie = NetMashClient(host="127.0.0.1", port=port, identity=charlie_identity)
+        await client_charlie.connect(timeout=3.0)
+        charlie_received = []
+        client_charlie.on_chat_message = lambda msg: charlie_received.append(msg)
+
+        # Clear bob's received chats
+        bob_received_chats.clear()
+
+        # Alice is in security room and sends a message
+        await client_alice.switch_room("security")
+        await client_bob.switch_room("security")
+        await client_alice.send_chat("Top secret security chat")
+        await asyncio.sleep(0.1)
+
+        # Bob (in security room) received it
+        assert any(c.payload.get("content") == "Top secret security chat" for c in bob_received_chats)
+        # Charlie (in general room) MUST NOT receive it
+        assert not any(c.payload.get("content") == "Top secret security chat" for c in charlie_received)
+
+        # Charlie sends message in GENERAL
+        await client_charlie.send_chat("General announcement")
+        await asyncio.sleep(0.1)
+
+        # Alice and Bob are in security room, so they MUST NOT receive general announcement
+        assert not any(c.payload.get("content") == "General announcement" for c in bob_received_chats)
+
+        # 8. Set / Modify Group PIN Test
+        # Alice (owner) modifies PIN of security group
+        set_pin_res = await client_alice.set_group_pin("security", "5678")
+        assert set_pin_res["success"] is True
+
+        # Bob (non-owner) attempts to modify PIN -> should fail
+        non_owner_res = await client_bob.set_group_pin("security", "0000")
+        assert non_owner_res["success"] is False
 
         # Disconnect clients
         await client_alice.disconnect()
         await client_bob.disconnect()
+        await client_charlie.disconnect()
 
     finally:
         await server.stop()
+

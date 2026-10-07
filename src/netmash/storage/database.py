@@ -157,6 +157,19 @@ class Database:
             return dict(row)
         return None
 
+    def update_group_pin(self, name: str, pin_hash: Optional[str]) -> bool:
+        """Updates or removes the PIN hash for a group."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                cursor = conn.execute(
+                    "UPDATE groups SET pin_hash = ? WHERE name = ?;",
+                    (pin_hash, name.lower()),
+                )
+                return cursor.rowcount > 0
+        except Exception:
+            return False
+
     def list_groups(self) -> List[Dict[str, Any]]:
         """Lists all groups along with total registered member counts."""
         conn = self.get_connection()

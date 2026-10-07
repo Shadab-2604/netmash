@@ -138,8 +138,10 @@ def build_parser() -> argparse.ArgumentParser:
     create_p.add_argument("group_name", help="Name of the group to create")
     create_p.add_argument(
         "--pin",
-        action="store_true",
-        help="Enable 4-digit PIN protection for the group",
+        nargs="?",
+        const="PROMPT",
+        default=None,
+        help="4-digit PIN for the group (leave blank to prompt interactively)",
     )
 
     # group list
@@ -148,6 +150,21 @@ def build_parser() -> argparse.ArgumentParser:
     # group join
     join_p = group_subparsers.add_parser("join", help="Join an existing group")
     join_p.add_argument("group_name", help="Name of the group to join")
+    join_p.add_argument(
+        "--pin",
+        type=str,
+        default=None,
+        help="4-digit PIN if the group is protected",
+    )
+
+    # group set-pin
+    set_pin_p = group_subparsers.add_parser("set-pin", help="Set or update group PIN (owner only)")
+    set_pin_p.add_argument("group_name", help="Name of the group")
+    set_pin_p.add_argument("pin", nargs="?", default=None, help="New 4-digit PIN")
+
+    # group remove-pin
+    rm_pin_p = group_subparsers.add_parser("remove-pin", help="Remove group PIN and make public (owner only)")
+    rm_pin_p.add_argument("group_name", help="Name of the group")
 
     # group leave
     leave_p = group_subparsers.add_parser("leave", help="Leave a group")
@@ -271,8 +288,9 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
             action = getattr(args, "group_action", None)
             if args.join_group_name or action == "join":
                 target_group = args.join_group_name or args.group_name
-                resp = await client.join_group(target_group)
-                if resp and resp.get("requires_pin"):
+                pin = getattr(args, "pin", None)
+                resp = await client.join_group(target_group, pin=pin)
+                if resp and resp.get("requires_pin") and pin is None:
                     pin = input(f"Group '{target_group}' requires a PIN. Enter 4-digit PIN: ")
                     resp = await client.join_group(target_group, pin=pin.strip())
                 if resp and resp.get("success"):
@@ -284,8 +302,8 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
 
             elif action == "create":
                 group_name = args.group_name
-                pin = None
-                if args.pin:
+                pin = getattr(args, "pin", None)
+                if pin == "PROMPT":
                     pin1 = input("Enter 4-digit PIN: ")
                     pin2 = input("Confirm PIN: ")
                     if pin1 != pin2:
@@ -300,6 +318,29 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
                     print(yellow(f"{resp.get('message')}"))
                 else:
                     print(red("Failed to create group."))
+
+            elif action == "set-pin":
+                group_name = args.group_name
+                pin = getattr(args, "pin", None)
+                if pin is None:
+                    pin = input(f"Enter new 4-digit PIN for '{group_name}': ")
+                resp = await client.set_group_pin(group_name, pin=pin.strip())
+                if resp and resp.get("success"):
+                    print(green(f"✓ {resp.get('message')}"))
+                elif resp:
+                    print(red(f"✗ {resp.get('message')}"))
+                else:
+                    print(red("Failed to set group PIN."))
+
+            elif action == "remove-pin":
+                group_name = args.group_name
+                resp = await client.set_group_pin(group_name, pin=None)
+                if resp and resp.get("success"):
+                    print(green(f"✓ {resp.get('message')}"))
+                elif resp:
+                    print(red(f"✗ {resp.get('message')}"))
+                else:
+                    print(red("Failed to remove group PIN."))
 
             elif action == "leave":
                 group_name = args.group_name
