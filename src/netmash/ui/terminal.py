@@ -542,8 +542,8 @@ async def run_interactive_chat(
                 print(yellow("\nDisconnecting from NetMash..."))
                 break
             except Exception as e:
-                print(red(f"\nUnexpected input error: {e}"))
-                break
+                print(red(f"\nError: {e}"))
+                continue
     finally:
         _save_readline_history(history_file)
 

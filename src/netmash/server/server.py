@@ -195,58 +195,67 @@ class NetMashServer:
         msg_type = msg.type
         payload = msg.payload or {}
 
-        # 1. Unauthenticated state: only HELLO is allowed
-        if not session.authenticated:
-            if msg_type == MessageType.HELLO:
-                await self._handle_hello(session, payload)
+        try:
+            # 1. Unauthenticated state: only HELLO is allowed
+            if not session.authenticated:
+                if msg_type == MessageType.HELLO:
+                    await self._handle_hello(session, payload)
+                else:
+                    await session.send_message(
+                        make_error("AUTH_REQUIRED", "Must authenticate with HELLO first.")
+                    )
+                return
+
+            # 2. Rate Limiting Check
+            if not self.rate_limiter.allow_message(session.node_id):
+                await session.send_message(
+                    make_error("RATE_LIMIT", "Rate limit exceeded. Please slow down.")
+                )
+                return
+
+            # 3. Message Dispatcher
+            if msg_type == MessageType.CHAT_MESSAGE:
+                await self._handle_chat_message(session, payload)
+            elif msg_type == MessageType.DM:
+                await self._handle_dm(session, payload)
+            elif msg_type == MessageType.GROUP_CREATE:
+                await self._handle_group_create(session, payload)
+            elif msg_type == MessageType.GROUP_LIST:
+                await self._handle_group_list(session)
+            elif msg_type == MessageType.GROUP_JOIN:
+                await self._handle_group_join(session, payload)
+            elif msg_type == MessageType.GROUP_LEAVE:
+                await self._handle_group_leave(session, payload)
+            elif msg_type == MessageType.GROUP_INFO:
+                await self._handle_group_info(session, payload)
+            elif msg_type == MessageType.GROUP_SET_PIN:
+                await self._handle_group_set_pin(session, payload)
+            elif msg_type == MessageType.ROOM_SWITCH:
+                await self._handle_room_switch(session, payload)
+            elif msg_type == MessageType.PEER_LIST:
+                await self._handle_peer_list(session)
+            elif msg_type == MessageType.NAME_CHANGE:
+                await self._handle_name_change(session, payload)
+            elif msg_type == MessageType.INFO_REQUEST:
+                await self._handle_info_request(session)
+            elif msg_type == MessageType.STATUS_REQUEST:
+                await self._handle_status_request(session)
+            elif msg_type == MessageType.PING:
+                await session.send_message(make_pong())
+            elif msg_type == MessageType.PONG:
+                pass  # Updated last_active already
             else:
                 await session.send_message(
-                    make_error("AUTH_REQUIRED", "Must authenticate with HELLO first.")
+                    make_error("UNKNOWN_TYPE", f"Unknown message type '{msg_type}'.")
                 )
-            return
-
-        # 2. Rate Limiting Check
-        if not self.rate_limiter.allow_message(session.node_id):
-            await session.send_message(
-                make_error("RATE_LIMIT", "Rate limit exceeded. Please slow down.")
-            )
-            return
-
-        # 3. Message Dispatcher
-        if msg_type == MessageType.CHAT_MESSAGE:
-            await self._handle_chat_message(session, payload)
-        elif msg_type == MessageType.DM:
-            await self._handle_dm(session, payload)
-        elif msg_type == MessageType.GROUP_CREATE:
-            await self._handle_group_create(session, payload)
-        elif msg_type == MessageType.GROUP_LIST:
-            await self._handle_group_list(session)
-        elif msg_type == MessageType.GROUP_JOIN:
-            await self._handle_group_join(session, payload)
-        elif msg_type == MessageType.GROUP_LEAVE:
-            await self._handle_group_leave(session, payload)
-        elif msg_type == MessageType.GROUP_INFO:
-            await self._handle_group_info(session, payload)
-        elif msg_type == MessageType.GROUP_SET_PIN:
-            await self._handle_group_set_pin(session, payload)
-        elif msg_type == MessageType.ROOM_SWITCH:
-            await self._handle_room_switch(session, payload)
-        elif msg_type == MessageType.PEER_LIST:
-            await self._handle_peer_list(session)
-        elif msg_type == MessageType.NAME_CHANGE:
-            await self._handle_name_change(session, payload)
-        elif msg_type == MessageType.INFO_REQUEST:
-            await self._handle_info_request(session)
-        elif msg_type == MessageType.STATUS_REQUEST:
-            await self._handle_status_request(session)
-        elif msg_type == MessageType.PING:
-            await session.send_message(make_pong())
-        elif msg_type == MessageType.PONG:
-            pass  # Updated last_active already
-        else:
-            await session.send_message(
-                make_error("UNKNOWN_TYPE", f"Unknown message type '{msg_type}'.")
-            )
+        except Exception as e:
+            logger.error("Error processing message %s from %s: %s", msg_type, session.node_id, e)
+            try:
+                await session.send_message(
+                    make_error("SERVER_ERROR", "An error occurred while processing your request.")
+                )
+            except Exception:
+                pass
 
     async def _handle_hello(
         self, session: ClientSession, payload: Dict[str, Any]
