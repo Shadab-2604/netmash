@@ -39,19 +39,91 @@ class MessageType:
     PEER_LEAVE = "peer_leave"
     NAME_CHANGE = "name_change"
     NAME_CHANGE_BROADCAST = "name_change_broadcast"
+    # Diagnostics & Stats
     INFO_REQUEST = "info_request"
     INFO_RESPONSE = "info_response"
     STATUS_REQUEST = "status_request"
     STATUS_RESPONSE = "status_response"
-    PING = "ping"
-    PONG = "pong"
-    ERROR = "error"
-    # Future V2 File Transfer Placeholders
+    STATS_REQUEST = "stats_request"
+    STATS_RESPONSE = "stats_response"
+    DIAGNOSE_REQUEST = "diagnose_request"
+    DIAGNOSE_RESPONSE = "diagnose_response"
+
+    # Presence
+    PRESENCE_UPDATE = "presence_update"
+    PRESENCE_BROADCAST = "presence_broadcast"
+
+    # Members & Roles
+    MEMBERS_REQUEST = "members_request"
+    MEMBERS_RESPONSE = "members_response"
+
+    # Chat Features: History, Search, Reply, Edit, Delete, Pin
+    HISTORY_REQUEST = "history_request"
+    HISTORY_RESPONSE = "history_response"
+    SEARCH_REQUEST = "search_request"
+    SEARCH_RESPONSE = "search_response"
+    MESSAGE_EDIT = "message_edit"
+    MESSAGE_EDIT_BROADCAST = "message_edit_broadcast"
+    MESSAGE_DELETE = "message_delete"
+    MESSAGE_DELETE_BROADCAST = "message_delete_broadcast"
+    MESSAGE_PIN = "message_pin"
+    MESSAGE_PIN_BROADCAST = "message_pin_broadcast"
+
+    # Group Moderation
+    GROUP_KICK = "group_kick"
+    GROUP_BAN = "group_ban"
+    GROUP_UNBAN = "group_unban"
+    GROUP_DELETE = "group_delete"
+    GROUP_ANNOUNCE = "group_announce"
+    ANNOUNCEMENT_BROADCAST = "announcement_broadcast"
+
+    # Network & Session
+    NETWORK_NAME_CHANGE = "network_name_change"
+    NETWORK_NAME_BROADCAST = "network_name_broadcast"
+
+    # Device Approval
+    DEVICE_APPROVAL_REQUEST = "device_approval_request"
+    DEVICE_APPROVAL_RESPONSE = "device_approval_response"
+
+    # File Transfer
     FILE_OFFER = "file_offer"
     FILE_ACCEPT = "file_accept"
     FILE_REJECT = "file_reject"
     FILE_CHUNK = "file_chunk"
     FILE_COMPLETE = "file_complete"
+    FILE_ERROR = "file_error"
+
+    # Administrative Subsystem
+    ADMIN_AUTH = "admin_auth"
+    ADMIN_AUTH_RESPONSE = "admin_auth_response"
+    ADMIN_STATUS_REQUEST = "admin_status_request"
+    ADMIN_STATUS_RESPONSE = "admin_status_response"
+    ADMIN_USERS_REQUEST = "admin_users_request"
+    ADMIN_USERS_RESPONSE = "admin_users_response"
+    ADMIN_GROUPS_REQUEST = "admin_groups_request"
+    ADMIN_GROUPS_RESPONSE = "admin_groups_response"
+    ADMIN_SESSIONS_REQUEST = "admin_sessions_request"
+    ADMIN_SESSIONS_RESPONSE = "admin_sessions_response"
+    ADMIN_MODERATION = "admin_moderation"
+    ADMIN_MODERATION_RESPONSE = "admin_moderation_response"
+    ADMIN_MESSAGE_STATS_REQUEST = "admin_message_stats_request"
+    ADMIN_MESSAGE_STATS_RESPONSE = "admin_message_stats_response"
+    ADMIN_DIAGNOSTICS_REQUEST = "admin_diagnostics_request"
+    ADMIN_DIAGNOSTICS_RESPONSE = "admin_diagnostics_response"
+    ADMIN_LOGS_REQUEST = "admin_logs_request"
+    ADMIN_LOGS_RESPONSE = "admin_logs_response"
+    ADMIN_STATS_REQUEST = "admin_stats_request"
+    ADMIN_STATS_RESPONSE = "admin_stats_response"
+    ADMIN_CONFIG_REQUEST = "admin_config_request"
+    ADMIN_CONFIG_RESPONSE = "admin_config_response"
+    ADMIN_SHUTDOWN = "admin_shutdown"
+    ADMIN_SHUTDOWN_RESPONSE = "admin_shutdown_response"
+    ADMIN_LOGOUT = "admin_logout"
+    SERVER_SHUTDOWN_BROADCAST = "server_shutdown_broadcast"
+
+    PING = "ping"
+    PONG = "pong"
+    ERROR = "error"
 
 
 @dataclass
@@ -155,17 +227,18 @@ def make_chat_message(
     sender_name: str = "",
     sender_id: str = "",
     message_id: Optional[str] = None,
+    reply_to: Optional[str] = None,
 ) -> NetMashMessage:
-    return NetMashMessage(
-        type=MessageType.CHAT_MESSAGE,
-        payload={
-            "message_id": message_id or str(uuid.uuid4()),
-            "room": room,
-            "content": content,
-            "sender_name": sender_name,
-            "sender_id": sender_id,
-        },
-    )
+    payload = {
+        "message_id": message_id or str(uuid.uuid4()),
+        "room": room,
+        "content": content,
+        "sender_name": sender_name,
+        "sender_id": sender_id,
+    }
+    if reply_to:
+        payload["reply_to"] = reply_to
+    return NetMashMessage(type=MessageType.CHAT_MESSAGE, payload=payload)
 
 
 def make_dm(

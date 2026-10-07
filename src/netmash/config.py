@@ -38,10 +38,17 @@ PIN_LOCKOUT_SECONDS = 30
 def get_app_dir() -> Path:
     """
     Returns the platform-specific data directory for NetMash.
+    - Supports NETMASH_DIR / NETMASH_HOME environment variable override for testing.
     - Windows: %APPDATA%/NetMash or ~/.netmash
     - Unix/macOS/WSL/Termux: ~/.config/netmash or ~/.netmash
     Creates the directory if it does not exist.
     """
+    env_override = os.environ.get("NETMASH_DIR") or os.environ.get("NETMASH_HOME")
+    if env_override:
+        base_dir = Path(env_override)
+        base_dir.mkdir(parents=True, exist_ok=True)
+        return base_dir
+
     if sys.platform == "win32":
         app_data = os.environ.get("APPDATA")
         if app_data:

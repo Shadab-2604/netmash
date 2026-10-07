@@ -20,6 +20,7 @@ class ChatEntry:
     room: str
     content: str
     timestamp: str
+    reply_to: Optional[str] = None
 
 
 class ChatManager:
@@ -38,6 +39,7 @@ class ChatManager:
         room: str,
         content: str,
         timestamp: Optional[str] = None,
+        reply_to: Optional[str] = None,
     ) -> ChatEntry:
         """
         Sanitizes, records to database, and returns a ChatEntry.
@@ -54,6 +56,7 @@ class ChatManager:
             room_id=room,
             content=sanitized_content,
             timestamp=now,
+            reply_to=reply_to,
         )
 
         return ChatEntry(
@@ -63,4 +66,5 @@ class ChatManager:
             room=room,
             content=sanitized_content,
             timestamp=now,
+            reply_to=reply_to,
         )

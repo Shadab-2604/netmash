@@ -11,7 +11,7 @@ import logging
 import socket
 import struct
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from netmash.config import (
     DEFAULT_DISCOVERY_PORT,
@@ -65,14 +65,14 @@ def create_multicast_socket(multicast_group: str, port: int) -> socket.socket:
     return sock
 
 
-async def discover_host(
+async def discover_hosts_all(
     timeout: float = 1.5,
     multicast_group: str = DEFAULT_MULTICAST_GROUP,
     discovery_port: int = DEFAULT_DISCOVERY_PORT,
-) -> Optional[Dict[str, Any]]:
+) -> List[Dict[str, Any]]:
     """
-    Broadcasts a discovery request on the LAN and listens for host responses.
-    Returns host info dictionary if found, or None if no host responded.
+    Broadcasts a discovery probe on LAN and collects all responding NetMash hosts.
+    Returns a list of unique host info dictionaries.
     """
     loop = asyncio.get_running_loop()
     discover_payload = json.dumps(
@@ -87,6 +87,8 @@ async def discover_host(
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.setblocking(False)
+
+    found_hosts: Dict[str, Dict[str, Any]] = {}
 
     try:
         # Send via Multicast
@@ -119,12 +121,12 @@ async def discover_host(
                     and msg.get("service") == DISCOVERY_SERVICE_NAME
                     and msg.get("type") == "host"
                 ):
-                    # Prefer reported IP or socket sender IP
                     host_ip = msg.get("ip") or addr[0]
                     if host_ip == "0.0.0.0" or host_ip.startswith("127."):
                         host_ip = addr[0]
                     msg["host_ip"] = host_ip
-                    return msg
+                    node_id = msg.get("node_id") or f"{host_ip}:{msg.get('port', 8765)}"
+                    found_hosts[node_id] = msg
             except (asyncio.TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
                 continue
             except Exception as e:
@@ -133,12 +135,29 @@ async def discover_host(
     finally:
         sock.close()
 
-    return None
+    return list(found_hosts.values())
+
+
+async def discover_host(
+    timeout: float = 1.5,
+    multicast_group: str = DEFAULT_MULTICAST_GROUP,
+    discovery_port: int = DEFAULT_DISCOVERY_PORT,
+) -> Optional[Dict[str, Any]]:
+    """
+    Broadcasts a discovery request on the LAN and listens for host responses.
+    Returns primary host info dictionary if found, or None if no host responded.
+    """
+    hosts = await discover_hosts_all(
+        timeout=timeout,
+        multicast_group=multicast_group,
+        discovery_port=discovery_port,
+    )
+    return hosts[0] if hosts else None
 
 
 class DiscoveryResponder:
     """
-    Listens for UDP discovery requests and responds with host details.
+    Listens for UDP discovery requests and responds with host details and network session name.
     Runs on the active NetMash host.
     """
 
@@ -149,15 +168,21 @@ class DiscoveryResponder:
         tcp_port: int = DEFAULT_HOST_PORT,
         discovery_port: int = DEFAULT_DISCOVERY_PORT,
         multicast_group: str = DEFAULT_MULTICAST_GROUP,
+        network_name: str = "NetMash Local",
     ) -> None:
         self.node_id = node_id
         self.host_name = host_name
         self.tcp_port = tcp_port
         self.discovery_port = discovery_port
         self.multicast_group = multicast_group
+        self.network_name = network_name
         self.running = False
         self.sock: Optional[socket.socket] = None
         self._task: Optional[asyncio.Task] = None
+
+    def set_network_name(self, name: str) -> None:
+        """Updates the broadcast network session name."""
+        self.network_name = name.strip() or "NetMash Local"
 
     async def start(self) -> None:
         """Starts the discovery listener loop."""
@@ -167,7 +192,7 @@ class DiscoveryResponder:
             )
             self.running = True
             self._task = asyncio.create_task(self._listen_loop())
-            logger.info("Discovery responder active on port %d", self.discovery_port)
+            logger.info("Discovery responder active on port %d (Network: %s)", self.discovery_port, self.network_name)
         except Exception as e:
             logger.warning("Could not bind UDP discovery socket: %s", e)
 
@@ -197,6 +222,7 @@ class DiscoveryResponder:
                             "type": "host",
                             "node_id": self.node_id,
                             "hostname": self.host_name,
+                            "network_name": self.network_name,
                             "ip": local_ip,
                             "port": self.tcp_port,
                         }

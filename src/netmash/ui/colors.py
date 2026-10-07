@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import sys
 
+from netmash.ui.theme import init_colors as theme_init_colors
+
 _COLOR_ENABLED = True
 
 
@@ -39,6 +41,9 @@ def init_colors(enable: bool = True) -> None:
                 kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
             except Exception:
                 pass
+
+    # Synchronize with theme engine
+    theme_init_colors(enable)
 
 
 def is_color_enabled() -> bool:

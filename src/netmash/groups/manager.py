@@ -84,6 +84,10 @@ class GroupManager:
         if not group:
             return False, f"Group '{norm_name}' does not exist.", False
 
+        # Check if banned
+        if self.db.is_banned(norm_name, node_id):
+            return False, f"You are banned from group '{norm_name}'.", False
+
         if norm_name == "general":
             if "general" not in self._online_members:
                 self._online_members["general"] = set()
@@ -115,8 +119,10 @@ class GroupManager:
             # Success, reset attempts
             self.pin_limiter.record_attempt(node_id, norm_name, success=True)
 
-        # Record in DB and online set
-        self.db.add_group_member(norm_name, node_id)
+        # Record in DB and online set with MEMBER role if not already owner
+        existing_role = self.db.get_group_role(norm_name, node_id)
+        role = existing_role if existing_role != "NONE" else "MEMBER"
+        self.db.add_group_member(norm_name, node_id, role=role)
         if norm_name not in self._online_members:
             self._online_members[norm_name] = set()
         self._online_members[norm_name].add(node_id)
@@ -138,6 +144,143 @@ class GroupManager:
         self.db.remove_group_member(norm_name, node_id)
         logger.info("User %s left group %s", node_id, norm_name)
         return True, f"You left '{norm_name}'."
+
+    def kick_member(
+        self, name: str, target_node_id: str, requester_node_id: str
+    ) -> Tuple[bool, str]:
+        """
+        Kicks a member from the group. Enforces role hierarchy:
+        - Owner can kick moderators and members.
+        - Moderator can kick members.
+        - Members cannot kick anyone.
+        """
+        norm_name = name.strip().lower()
+        if norm_name == "general":
+            return False, "Cannot kick users from the GENERAL room."
+
+        requester_role = self.db.get_group_role(norm_name, requester_node_id)
+        target_role = self.db.get_group_role(norm_name, target_node_id)
+
+        if requester_role not in ("OWNER", "MODERATOR"):
+            return False, "Permission denied: Only group owners and moderators can kick members."
+
+        if target_role == "OWNER":
+            return False, "Permission denied: Cannot kick the group owner."
+
+        if requester_role == "MODERATOR" and target_role in ("MODERATOR", "OWNER"):
+            return False, "Permission denied: Moderators cannot kick other moderators or the owner."
+
+        self.db.remove_group_member(norm_name, target_node_id)
+        if norm_name in self._online_members:
+            self._online_members[norm_name].discard(target_node_id)
+
+        logger.info("User %s kicked %s from %s", requester_node_id, target_node_id, norm_name)
+        return True, f"User was kicked from '{norm_name}'."
+
+    def ban_member(
+        self, name: str, target_node_id: str, requester_node_id: str
+    ) -> Tuple[bool, str]:
+        """
+        Bans a member from the group.
+        Owner/moderator only. Banned nodes cannot rejoin.
+        """
+        norm_name = name.strip().lower()
+        if norm_name == "general":
+            return False, "Cannot ban users from the GENERAL room."
+
+        requester_role = self.db.get_group_role(norm_name, requester_node_id)
+        target_role = self.db.get_group_role(norm_name, target_node_id)
+
+        if requester_role not in ("OWNER", "MODERATOR"):
+            return False, "Permission denied: Only group owners and moderators can ban members."
+
+        if target_role == "OWNER":
+            return False, "Permission denied: Cannot ban the group owner."
+
+        if requester_role == "MODERATOR" and target_role in ("MODERATOR", "OWNER"):
+            return False, "Permission denied: Moderators cannot ban other moderators or the owner."
+
+        banned = self.db.ban_user(norm_name, target_node_id, banned_by=requester_node_id)
+        if norm_name in self._online_members:
+            self._online_members[norm_name].discard(target_node_id)
+
+        if banned:
+            logger.info("User %s banned %s from %s", requester_node_id, target_node_id, norm_name)
+            return True, f"User was banned from '{norm_name}'."
+        return False, f"Failed to ban user from '{norm_name}'."
+
+    def unban_member(
+        self, name: str, target_node_id: str, requester_node_id: str
+    ) -> Tuple[bool, str]:
+        """
+        Unbans a member from the group (owner only).
+        """
+        norm_name = name.strip().lower()
+        requester_role = self.db.get_group_role(norm_name, requester_node_id)
+        if requester_role != "OWNER":
+            return False, "Permission denied: Only the group owner can unban users."
+
+        unbanned = self.db.unban_user(norm_name, target_node_id)
+        if unbanned:
+            logger.info("User %s unbanned %s in %s", requester_node_id, target_node_id, norm_name)
+            return True, f"User was unbanned from '{norm_name}'."
+        return False, f"User was not banned from '{norm_name}'."
+
+    def delete_group(self, name: str, requester_node_id: str) -> Tuple[bool, str]:
+        """
+        Deletes a group completely (owner only).
+        """
+        norm_name = name.strip().lower()
+        if norm_name == "general":
+            return False, "Cannot delete the GENERAL room."
+
+        group = self.db.get_group(norm_name)
+        if not group:
+            return False, f"Group '{norm_name}' does not exist."
+
+        if group.get("owner_id") != requester_node_id:
+            return False, "Permission denied: Only the group owner can delete this group."
+
+        deleted = self.db.delete_group(norm_name)
+        if deleted:
+            if norm_name in self._online_members:
+                del self._online_members[norm_name]
+            logger.info("Group %s deleted by owner %s", norm_name, requester_node_id)
+            return True, f"Group '{norm_name}' was deleted."
+        return False, f"Failed to delete group '{norm_name}'."
+
+    def get_members_categorized(self, name: str) -> Dict[str, Any]:
+        """
+        Returns group members structured into Owner, Moderators, Members.
+        """
+        norm_name = name.strip().lower()
+        group = self.db.get_group(norm_name)
+        if not group:
+            return {"group": norm_name, "found": False}
+
+        raw_members = self.db.list_group_members(norm_name)
+        owner = []
+        moderators = []
+        members = []
+
+        for m in raw_members:
+            display = m.get("username") or m.get("user_node_id")[:8]
+            role = m.get("role", "MEMBER").upper()
+            if role == "OWNER":
+                owner.append(display)
+            elif role == "MODERATOR":
+                moderators.append(display)
+            else:
+                members.append(display)
+
+        return {
+            "group": norm_name,
+            "found": True,
+            "owner": owner,
+            "moderators": moderators,
+            "members": members,
+            "total": len(raw_members),
+        }
 
     def set_group_pin(
         self, name: str, requester_node_id: str, new_pin: Optional[str] = None

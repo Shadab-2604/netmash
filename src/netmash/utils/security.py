@@ -90,7 +90,7 @@ class MessageRateLimiter:
     Prevents message flooding and server resource exhaustion.
     """
 
-    def __init__(self, rate: float = 5.0, capacity: float = 10.0) -> None:
+    def __init__(self, rate: float = 20.0, capacity: float = 30.0) -> None:
         self.rate = rate  # Tokens per second
         self.capacity = capacity  # Maximum bucket capacity
         self.tokens: Dict[str, float] = {}
@@ -117,6 +117,100 @@ class MessageRateLimiter:
     def remove_client(self, client_id: str) -> None:
         self.tokens.pop(client_id, None)
         self.last_update.pop(client_id, None)
+
+
+# Default precomputed scrypt hash for initial development administrative credential
+# (scrypt with 16-byte cryptographic salt: N=16384, r=8, p=1, dklen=32)
+# Configurable/replaceable via NETMASH_ADMIN_HASH environment variable or server config.
+DEFAULT_ADMIN_PASSWORD_HASH = (
+    "scrypt$a1b2c3d4e5f60718293a4b5c6d7e8f90$c5b49e962dddec44f69e1226c50adc23923714382c711c780c5f109dfbe818c6"
+)
+
+
+def hash_password(password: str, salt: bytes | None = None) -> str:
+    """
+    Hashes an administrative or user password using scrypt (memory-hard password hashing).
+    Format: scrypt$<salt_hex>$<hash_hex>
+    """
+    if salt is None:
+        salt = os.urandom(16)
+
+    # Scrypt parameters: N=16384, r=8, p=1, maxmem=32MB, dklen=32
+    derived = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=16384,
+        r=8,
+        p=1,
+        maxmem=32 * 1024 * 1024,
+        dklen=32,
+    )
+    return f"scrypt${salt.hex()}${derived.hex()}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """
+    Verifies a password against a stored scrypt hash in constant time.
+    Prevents timing attacks.
+    """
+    try:
+        parts = stored_hash.split("$")
+        if len(parts) != 3 or parts[0] != "scrypt":
+            return False
+
+        salt = bytes.fromhex(parts[1])
+        expected_hash = bytes.fromhex(parts[2])
+
+        actual_hash = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=16384,
+            r=8,
+            p=1,
+            maxmem=32 * 1024 * 1024,
+            dklen=32,
+        )
+
+        return hmac.compare_digest(actual_hash, expected_hash)
+    except Exception:
+        return False
+
+
+class AdminAttemptLimiter:
+    """
+    Rate limiter and lockout tracker for administrative authentication.
+    Locks out repeated failed attempts per node_id and IP to prevent brute force attacks.
+    """
+
+    def __init__(self, max_attempts: int = 3, lockout_seconds: float = 60.0) -> None:
+        self.max_attempts = max_attempts
+        self.lockout_seconds = lockout_seconds
+        self.attempts: Dict[str, int] = {}  # key: identifier (node_id or ip) -> count
+        self.lockout_until: Dict[str, float] = {}
+
+    def is_locked_out(self, identifier: str) -> Tuple[bool, float]:
+        """Checks if the given client is currently locked out from admin authentication."""
+        now = time.monotonic()
+        locked_until = self.lockout_until.get(identifier, 0.0)
+        if now < locked_until:
+            remaining = locked_until - now
+            return True, remaining
+        return False, 0.0
+
+    def record_attempt(self, identifier: str, success: bool) -> None:
+        """Records an admin login attempt and enforces lockout if max_attempts exceeded."""
+        if success:
+            self.attempts.pop(identifier, None)
+            self.lockout_until.pop(identifier, None)
+            return
+
+        now = time.monotonic()
+        count = self.attempts.get(identifier, 0) + 1
+        self.attempts[identifier] = count
+
+        if count >= self.max_attempts:
+            self.lockout_until[identifier] = now + self.lockout_seconds
+            self.attempts[identifier] = 0  # Reset counter for next cycle after cooldown expires
 
 
 class PinAttemptLimiter:

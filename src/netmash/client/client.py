@@ -56,6 +56,18 @@ class NetMashClient:
         self.on_peer_join: Optional[Callable[[NetMashMessage], None]] = None
         self.on_peer_leave: Optional[Callable[[NetMashMessage], None]] = None
         self.on_name_change: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_presence_update: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_message_edit: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_message_delete: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_message_pin: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_announcement: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_network_name_change: Optional[Callable[[NetMashMessage], None]] = None
+        self.is_admin = False
+        self.on_file_offer: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_file_chunk: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_file_complete: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_file_error: Optional[Callable[[NetMashMessage], None]] = None
+        self.on_server_shutdown: Optional[Callable[[NetMashMessage], None]] = None
         self.on_error: Optional[Callable[[NetMashMessage], None]] = None
         self.on_disconnect: Optional[Callable[[], None]] = None
 
@@ -149,8 +161,31 @@ class NetMashClient:
             self.on_peer_join(msg)
         elif msg_type == MessageType.PEER_LEAVE and self.on_peer_leave:
             self.on_peer_leave(msg)
-        elif msg_type == MessageType.NAME_CHANGE_BROADCAST and self.on_name_change:
+        elif msg_type in (MessageType.NAME_CHANGE_BROADCAST, MessageType.NAME_CHANGE) and self.on_name_change:
             self.on_name_change(msg)
+        elif msg_type == MessageType.PRESENCE_BROADCAST and self.on_presence_update:
+            self.on_presence_update(msg)
+        elif msg_type == MessageType.MESSAGE_EDIT_BROADCAST and self.on_message_edit:
+            self.on_message_edit(msg)
+        elif msg_type == MessageType.MESSAGE_DELETE_BROADCAST and self.on_message_delete:
+            self.on_message_delete(msg)
+        elif msg_type == MessageType.MESSAGE_PIN_BROADCAST and self.on_message_pin:
+            self.on_message_pin(msg)
+        elif msg_type == MessageType.ANNOUNCEMENT_BROADCAST and self.on_announcement:
+            self.on_announcement(msg)
+        elif msg_type == MessageType.NETWORK_NAME_BROADCAST and self.on_network_name_change:
+            self.on_network_name_change(msg)
+        elif msg_type == MessageType.FILE_OFFER and self.on_file_offer:
+            self.on_file_offer(msg)
+        elif msg_type == MessageType.FILE_CHUNK and self.on_file_chunk:
+            self.on_file_chunk(msg)
+        elif msg_type == MessageType.FILE_COMPLETE and self.on_file_complete:
+            self.on_file_complete(msg)
+        elif msg_type == MessageType.FILE_ERROR and self.on_file_error:
+            self.on_file_error(msg)
+        elif msg_type == MessageType.SERVER_SHUTDOWN_BROADCAST and self.on_server_shutdown:
+            reason = msg.payload.get("reason", "Server shutdown")
+            self.on_server_shutdown(reason)
         elif msg_type == MessageType.ERROR:
             # If an error arrived and a request is waiting, resolve it with error
             for pending_list in self._pending_responses.values():
@@ -201,7 +236,9 @@ class NetMashClient:
 
     # High-level API methods
 
-    async def send_chat(self, content: str, room: Optional[str] = None) -> bool:
+    async def send_chat(
+        self, content: str, room: Optional[str] = None, reply_to: Optional[str] = None
+    ) -> bool:
         """Sends a chat message to the current room (or specified room)."""
         target_room = room or self.current_room
         msg = make_chat_message(
@@ -209,6 +246,7 @@ class NetMashClient:
             content=content,
             sender_name=self.identity.username,
             sender_id=self.identity.node_id,
+            reply_to=reply_to,
         )
         return await self.send_message(msg)
 
@@ -222,6 +260,129 @@ class NetMashClient:
         )
         return await self.send_message(msg)
 
+    async def set_presence(self, status: str) -> bool:
+        """Updates user presence status (ONLINE, AWAY, BUSY)."""
+        msg = NetMashMessage(
+            type=MessageType.PRESENCE_UPDATE,
+            payload={"status": status.upper().strip()},
+        )
+        return await self.send_message(msg)
+
+    async def get_members(self, group_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Requests categorized members for a group."""
+        target = group_name or self.current_room
+        msg = NetMashMessage(
+            type=MessageType.MEMBERS_REQUEST,
+            payload={"group": target},
+        )
+        resp = await self._send_and_wait(msg, MessageType.MEMBERS_RESPONSE)
+        return resp.payload if resp else None
+
+    async def get_history(self, room: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Requests recent message history for a room."""
+        target = room or self.current_room
+        msg = NetMashMessage(
+            type=MessageType.HISTORY_REQUEST,
+            payload={"room": target, "limit": limit},
+        )
+        resp = await self._send_and_wait(msg, MessageType.HISTORY_RESPONSE)
+        if resp and "messages" in resp.payload:
+            return resp.payload["messages"]
+        return []
+
+    async def search_messages(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Searches messages across authorized rooms."""
+        msg = NetMashMessage(
+            type=MessageType.SEARCH_REQUEST,
+            payload={"query": query, "limit": limit},
+        )
+        resp = await self._send_and_wait(msg, MessageType.SEARCH_RESPONSE)
+        if resp and "results" in resp.payload:
+            return resp.payload["results"]
+        return []
+
+    async def edit_message(self, message_id: str, new_content: str) -> bool:
+        """Requests to edit a sent message."""
+        msg = NetMashMessage(
+            type=MessageType.MESSAGE_EDIT,
+            payload={"message_id": message_id, "content": new_content},
+        )
+        return await self.send_message(msg)
+
+    async def delete_message(self, message_id: str) -> bool:
+        """Requests to delete a message."""
+        msg = NetMashMessage(
+            type=MessageType.MESSAGE_DELETE,
+            payload={"message_id": message_id},
+        )
+        return await self.send_message(msg)
+
+    async def pin_message(self, message_id: str, is_pinned: bool = True) -> bool:
+        """Pins or unpins a message."""
+        msg = NetMashMessage(
+            type=MessageType.MESSAGE_PIN,
+            payload={"message_id": message_id, "pinned": is_pinned},
+        )
+        return await self.send_message(msg)
+
+    async def kick_member(self, group_name: str, target_user: str) -> Optional[Dict[str, Any]]:
+        """Kicks a member from a group (owner/moderator only)."""
+        msg = NetMashMessage(
+            type=MessageType.GROUP_KICK,
+            payload={"group": group_name, "target_user": target_user},
+        )
+        resp = await self._send_and_wait(msg, MessageType.GROUP_INFO_RESPONSE)
+        return resp.payload if resp else None
+
+    async def ban_member(self, group_name: str, target_user: str) -> Optional[Dict[str, Any]]:
+        """Bans a member from a group (owner/moderator only)."""
+        msg = NetMashMessage(
+            type=MessageType.GROUP_BAN,
+            payload={"group": group_name, "target_user": target_user},
+        )
+        resp = await self._send_and_wait(msg, MessageType.GROUP_INFO_RESPONSE)
+        return resp.payload if resp else None
+
+    async def unban_member(self, group_name: str, target_user: str) -> Optional[Dict[str, Any]]:
+        """Unbans a member from a group (owner only)."""
+        msg = NetMashMessage(
+            type=MessageType.GROUP_UNBAN,
+            payload={"group": group_name, "target_user": target_user},
+        )
+        resp = await self._send_and_wait(msg, MessageType.GROUP_INFO_RESPONSE)
+        return resp.payload if resp else None
+
+    async def delete_group(self, group_name: str) -> Optional[Dict[str, Any]]:
+        """Deletes a group (owner only)."""
+        msg = NetMashMessage(
+            type=MessageType.GROUP_DELETE,
+            payload={"group": group_name},
+        )
+        resp = await self._send_and_wait(msg, MessageType.GROUP_INFO_RESPONSE)
+        return resp.payload if resp else None
+
+    async def announce(self, content: str, room: Optional[str] = None) -> bool:
+        """Broadcasts an announcement banner to a room."""
+        msg = NetMashMessage(
+            type=MessageType.GROUP_ANNOUNCE,
+            payload={"content": content, "room": room or self.current_room},
+        )
+        return await self.send_message(msg)
+
+    async def set_network_name(self, new_name: str) -> bool:
+        """Sets the LAN network session name."""
+        msg = NetMashMessage(
+            type=MessageType.NETWORK_NAME_CHANGE,
+            payload={"network_name": new_name},
+        )
+        return await self.send_message(msg)
+
+    async def get_stats(self) -> Optional[Dict[str, Any]]:
+        """Requests server statistics."""
+        msg = NetMashMessage(type=MessageType.STATS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.STATS_RESPONSE)
+        return resp.payload if resp else None
+
     async def create_group(
         self, name: str, pin: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
@@ -231,6 +392,8 @@ class NetMashClient:
             payload={"name": name, "pin": pin},
         )
         resp = await self._send_and_wait(msg, MessageType.GROUP_CREATE_RESPONSE)
+        if resp and resp.payload.get("success"):
+            self.current_room = resp.payload.get("name", name).lower().strip()
         return resp.payload if resp else None
 
     async def list_groups(self) -> List[Dict[str, Any]]:
@@ -327,6 +490,119 @@ class NetMashClient:
         msg = NetMashMessage(type=MessageType.STATUS_REQUEST, payload={})
         resp = await self._send_and_wait(msg, MessageType.STATUS_RESPONSE)
         return resp.payload if resp else None
+
+    # -------------------------------------------------------------------------
+    # Administrative Methods
+    # -------------------------------------------------------------------------
+
+    async def admin_auth(self, password: str) -> Dict[str, Any]:
+        """Authenticates client session as administrator."""
+        msg = NetMashMessage(
+            type=MessageType.ADMIN_AUTH,
+            payload={"password": password},
+        )
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_AUTH_RESPONSE)
+        if resp and resp.payload.get("success"):
+            self.is_admin = True
+        return resp.payload if resp else {"success": False, "message": "No response from server."}
+
+    async def admin_get_status(self) -> Optional[Dict[str, Any]]:
+        """Requests administrative server status."""
+        msg = NetMashMessage(type=MessageType.ADMIN_STATUS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_STATUS_RESPONSE)
+        return resp.payload if resp else None
+
+    async def admin_get_users(self) -> Optional[List[Dict[str, Any]]]:
+        """Requests administrative online users list."""
+        msg = NetMashMessage(type=MessageType.ADMIN_USERS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_USERS_RESPONSE)
+        if resp and "users" in resp.payload:
+            return resp.payload["users"]
+        return None
+
+    async def admin_get_groups(self) -> Optional[List[Dict[str, Any]]]:
+        """Requests administrative group list with full details."""
+        msg = NetMashMessage(type=MessageType.ADMIN_GROUPS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_GROUPS_RESPONSE)
+        if resp and "groups" in resp.payload:
+            return resp.payload["groups"]
+        return None
+
+    async def admin_get_sessions(self) -> Optional[List[Dict[str, Any]]]:
+        """Requests active client sessions diagnostic list."""
+        msg = NetMashMessage(type=MessageType.ADMIN_SESSIONS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_SESSIONS_RESPONSE)
+        if resp and "sessions" in resp.payload:
+            return resp.payload["sessions"]
+        return None
+
+    async def admin_moderation(
+        self, action: str, target_user: str, group: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Executes administrative moderation action (kick/ban/unban)."""
+        msg = NetMashMessage(
+            type=MessageType.ADMIN_MODERATION,
+            payload={"action": action, "target_user": target_user, "group": group or ""},
+        )
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_MODERATION_RESPONSE)
+        return resp.payload if resp else None
+
+    async def admin_get_message_stats(
+        self, action: str = "stats", message_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Requests administrative message statistics or message deletion."""
+        msg = NetMashMessage(
+            type=MessageType.ADMIN_MESSAGE_STATS_REQUEST,
+            payload={"action": action, "message_id": message_id or ""},
+        )
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_MESSAGE_STATS_RESPONSE)
+        return resp.payload if resp else None
+
+    async def admin_get_diagnostics(self) -> Optional[Dict[str, Any]]:
+        """Requests server network diagnostics."""
+        msg = NetMashMessage(type=MessageType.ADMIN_DIAGNOSTICS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_DIAGNOSTICS_RESPONSE)
+        return resp.payload if resp else None
+
+    async def admin_get_logs(self) -> Optional[List[Dict[str, Any]]]:
+        """Requests recent server logs."""
+        msg = NetMashMessage(type=MessageType.ADMIN_LOGS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_LOGS_RESPONSE)
+        if resp and "logs" in resp.payload:
+            return resp.payload["logs"]
+        return None
+
+    async def admin_get_stats(self) -> Optional[Dict[str, Any]]:
+        """Requests overall application metrics."""
+        msg = NetMashMessage(type=MessageType.ADMIN_STATS_REQUEST, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_STATS_RESPONSE)
+        return resp.payload if resp else None
+
+    async def admin_get_config(
+        self, set_network_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Inspects or safely updates server configuration."""
+        payload: Dict[str, Any] = {}
+        if set_network_name:
+            payload["set_network_name"] = set_network_name
+        msg = NetMashMessage(type=MessageType.ADMIN_CONFIG_REQUEST, payload=payload)
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_CONFIG_RESPONSE)
+        return resp.payload if resp else None
+
+    async def admin_shutdown_server(
+        self, reason: str = "Admin requested shutdown"
+    ) -> Optional[Dict[str, Any]]:
+        """Requests graceful server shutdown."""
+        msg = NetMashMessage(type=MessageType.ADMIN_SHUTDOWN, payload={"reason": reason})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_SHUTDOWN_RESPONSE)
+        return resp.payload if resp else None
+
+    async def admin_logout(self) -> bool:
+        """Logs out administrative privileges."""
+        msg = NetMashMessage(type=MessageType.ADMIN_LOGOUT, payload={})
+        resp = await self._send_and_wait(msg, MessageType.ADMIN_AUTH_RESPONSE)
+        self.is_admin = False
+        return bool(resp and resp.payload.get("success"))
 
     async def disconnect(self) -> None:
         """Disconnects cleanly from the host."""

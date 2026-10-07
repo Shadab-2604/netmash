@@ -1,6 +1,7 @@
 """
 Terminal UI components and interactive chat loop for NetMash.
-Provides banners, tables, formatted outputs, and non-blocking CLI input handling.
+Provides banners, tables, formatted outputs, non-blocking CLI input handling,
+and full phase 1-8 command handlers.
 """
 
 from __future__ import annotations
@@ -9,12 +10,21 @@ import asyncio
 import datetime
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
+from netmash import __version__
 from netmash.client.client import NetMashClient
-from netmash.config import get_app_dir
-from netmash.protocol.messages import NetMashMessage
+from netmash.config import (
+    DEFAULT_DISCOVERY_PORT,
+    DEFAULT_HOST_PORT,
+    DEFAULT_MULTICAST_GROUP,
+    get_app_dir,
+)
+from netmash.discovery.service import discover_host
+from netmash.protocol.messages import MessageType, NetMashMessage
+from netmash.server.server import NetMashServer
 from netmash.ui.colors import (
     bold,
     bright_cyan,
@@ -26,11 +36,31 @@ from netmash.ui.colors import (
     red,
     yellow,
 )
+from netmash.ui.theme import (
+    get_active_theme,
+    get_all_themes,
+    get_theme,
+    get_theme_count,
+    load_saved_theme,
+    set_active_theme,
+    set_random_theme,
+)
 from netmash.updater import apply_update_async, check_for_updates_async
+from netmash.ui.input import TerminalInputManager
+from netmash.utils.diagnostics import run_diagnostics
+from netmash.utils.file_transfer import (
+    MAX_FILE_SIZE_BYTES,
+    calculate_sha256,
+    get_downloads_dir,
+    read_file_chunks,
+    sanitize_filename,
+)
+from netmash.utils.network import get_local_ip, get_platform_info, get_system_hostname
 from netmash.utils.security import sanitize_terminal_text
 
 SLASH_COMMANDS = [
     "/help",
+    "/theme",
     "/users",
     "/peers",
     "/groups",
@@ -45,6 +75,33 @@ SLASH_COMMANDS = [
     "/dm",
     "/room",
     "/name",
+    "/whoami",
+    "/members",
+    "/online",
+    "/reconnect",
+    "/diagnose",
+    "/version",
+    "/netinfo",
+    "/stats",
+    "/history",
+    "/search",
+    "/unread",
+    "/reply",
+    "/edit",
+    "/delete",
+    "/pin",
+    "/unpin",
+    "/away",
+    "/busy",
+    "/mute",
+    "/unmute",
+    "/notify",
+    "/kick",
+    "/ban",
+    "/unban",
+    "/announce",
+    "/send",
+    "/network-name",
     "/update",
     "/check-update",
     "/restart",
@@ -104,21 +161,41 @@ def print_banner() -> None:
 
 def print_divider(label: Optional[str] = None) -> None:
     """Prints a clean horizontal terminal divider."""
-    width = 50
+    width = 54
     if label:
         sanitized_label = f" {label} "
-        left_len = (width - len(sanitized_label)) // 2
-        right_len = width - len(sanitized_label) - left_len
+        left_len = max(2, (width - len(sanitized_label)) // 2)
+        right_len = max(2, width - len(sanitized_label) - left_len)
         print(gray("─" * left_len) + cyan(sanitized_label) + gray("─" * right_len))
     else:
         print(gray("─" * width))
 
 
+def render_whoami(
+    username: str,
+    node_id: str,
+    hostname: str,
+    status: str = "ONLINE",
+    role: str = "MEMBER",
+    host: str = "Host",
+) -> None:
+    """Renders formatted /whoami identity view."""
+    print(bold("\nNetMash Identity\n"))
+    print(f"{'Username':<12}: {cyan(username)}")
+    print(f"{'Node ID':<12}: {dim(node_id)}")
+    print(f"{'Hostname':<12}: {hostname}")
+    status_str = green(status) if status == "ONLINE" else (yellow(status) if status == "AWAY" else red(status))
+    print(f"{'Status':<12}: {status_str}")
+    print(f"{'Role':<12}: {role}")
+    print(f"{'Host':<12}: {host}")
+    print()
+
+
 def render_peers_table(peers: List[Dict[str, Any]]) -> None:
-    """Renders the formatted list of online peers."""
-    print(bold("\nNetMash Peers\n"))
-    print(f"{bold('USER'):<18} {bold('HOSTNAME'):<20} {bold('STATUS')}")
-    print(gray("─" * 48))
+    """Renders formatted list of connected peers with presence and latency."""
+    print(bold("\nOnline Peers\n"))
+    print(f"{bold('USER'):<18} {bold('STATUS'):<12} {bold('LATENCY'):<10} {bold('HOSTNAME')}")
+    print(gray("─" * 54))
     if not peers:
         print(dim("No peers online."))
         print()
@@ -127,15 +204,64 @@ def render_peers_table(peers: List[Dict[str, Any]]) -> None:
     for p in peers:
         user = sanitize_terminal_text(p.get("username", ""))[:16]
         host = sanitize_terminal_text(p.get("hostname", ""))[:18]
-        status = green("ONLINE") if p.get("status") == "ONLINE" else gray("OFFLINE")
-        print(f"{cyan(user):<27} {host:<20} {status}")
+        raw_status = p.get("status", "ONLINE")
+        if raw_status == "ONLINE":
+            status_str = green("ONLINE")
+        elif raw_status == "AWAY":
+            status_str = yellow("AWAY")
+        elif raw_status == "BUSY":
+            status_str = red("BUSY")
+        else:
+            status_str = gray("OFFLINE")
+
+        lat = p.get("latency_ms", 0.0)
+        lat_str = f"{lat}ms" if lat > 0 else "<1ms"
+        print(f"{cyan(user):<27} {status_str:<21} {lat_str:<10} {host}")
+    print()
+
+
+def render_members(data: Dict[str, Any]) -> None:
+    """Renders categorized group members (Owner, Moderators, Members)."""
+    group_name = data.get("group", "group")
+    print(bold(f"\nMembers for: {group_name}\n"))
+
+    owner = data.get("owner")
+    print(bold("Owner:"))
+    if isinstance(owner, list):
+        if owner:
+            for o in owner:
+                print(f"  {green(o)}")
+        else:
+            print(dim("  None"))
+    elif owner:
+        print(f"  {green(str(owner))}")
+    else:
+        print(dim("  None"))
+    print()
+
+    mods = data.get("moderators", [])
+    print(bold("Moderators:"))
+    if mods:
+        for m in mods:
+            print(f"  {yellow(m)}")
+    else:
+        print(dim("  None"))
+    print()
+
+    members = data.get("members", [])
+    print(bold("Members:"))
+    if members:
+        for mem in members:
+            print(f"  {cyan(mem)}")
+    else:
+        print(dim("  None"))
     print()
 
 
 def render_groups_table(
     groups: List[Dict[str, Any]], current_room: Optional[str] = None
 ) -> None:
-    """Renders the formatted list of available groups. Star indicates the current active room."""
+    """Renders formatted list of available groups. Star strictly shows for current active room."""
     print(bold("\nAvailable Groups\n"))
     print(f"{bold('NAME'):<20} {bold('MEMBERS'):<12} {bold('ACCESS')}")
     print(gray("─" * 42))
@@ -151,7 +277,6 @@ def render_groups_table(
         access = g.get("access", "PUBLIC")
         access_str = yellow("PIN") if access == "PIN" else green("PUBLIC")
 
-        # The star (*) strictly ONLY shows for the single room the user is currently inside
         is_inside = False
         if current_room:
             is_inside = raw_name.lower() == current_room.lower()
@@ -163,10 +288,153 @@ def render_groups_table(
     print()
 
 
+def render_diagnostics(diag: Dict[str, Any]) -> None:
+    """Renders formatted system diagnostics results with remediation hints."""
+    print(bold("\nNetMash Diagnostics\n"))
+    checks = diag.get("checks", [])
+    for c in checks:
+        name = c.get("name", "")
+        ok = c.get("ok", False)
+        detail = c.get("detail", "")
+        if ok:
+            print(f"{green('✓')} {name:<26} {dim(detail)}")
+        else:
+            print(f"{red('✗')} {name:<26} {red(detail)}")
+
+    status = diag.get("status", "READY")
+    status_str = green(status) if status == "READY" else yellow(status)
+    print(f"\nResult: {status_str}")
+
+    remediations = diag.get("remediations", [])
+    if remediations:
+        print(yellow("\nRemediation hints:"))
+        for r in remediations:
+            print(f"  • {r}")
+    print()
+
+
+def render_netinfo(info: Dict[str, Any]) -> None:
+    """Renders local network information without arbitrary LAN scanning."""
+    print(bold("\nNetwork Information\n"))
+    print(f"{'Interface':<14}: {info.get('interface', 'Wi-Fi / Ethernet')}")
+    print(f"{'Address':<14}: {green(str(info.get('address', '127.0.0.1')))}")
+    print(f"{'Subnet':<14}: {info.get('subnet', '/24')}")
+    print(f"{'Transport':<14}: {info.get('transport', 'TCP Wire Protocol')}")
+    print(f"{'Port':<14}: {info.get('port', DEFAULT_HOST_PORT)}")
+    print(f"{'Discovery':<14}: UDP Port {info.get('discovery_port', DEFAULT_DISCOVERY_PORT)}")
+    print(f"{'Host':<14}: {info.get('host', 'Local')}")
+    print(f"{'Peers':<14}: {info.get('peers', 0)}")
+    print()
+
+
+def render_stats(stats: Dict[str, Any]) -> None:
+    """Renders NetMash host statistics."""
+    print(bold("\nNetMash Statistics\n"))
+    print(f"{'Uptime':<18}: {stats.get('uptime', '00:00:00')}")
+    print(f"{'Connected Peers':<18}: {stats.get('connected_peers', 0)}")
+    print(f"{'Groups':<18}: {stats.get('total_groups', 0)}")
+    print(f"{'Active Rooms':<18}: {stats.get('active_rooms', 0)}")
+    print(f"{'Messages':<18}: {stats.get('total_messages', 0)}")
+    print("\nNetwork:")
+    print(f"  {'RX':<16}: {stats.get('rx_mb', 0.0)} MB")
+    print(f"  {'TX':<16}: {stats.get('tx_mb', 0.0)} MB")
+    print(f"\n{'Errors':<18}: {stats.get('error_count', 0)}")
+    print()
+
+
+def render_history(messages: List[Dict[str, Any]]) -> None:
+    """Renders recent message history in room."""
+    print(bold("\nRecent Messages\n"))
+    if not messages:
+        print(dim("No recent messages."))
+        print()
+        return
+
+    for m in messages:
+        ts = m.get("timestamp", "")
+        time_part = ts[11:16] if len(ts) >= 16 else ts
+        sender = sanitize_terminal_text(m.get("sender_name", "Unknown"))
+        msg_id = m.get("message_id", "")
+        content = sanitize_terminal_text(m.get("content", ""))
+        reply_to = m.get("reply_to")
+        pinned = m.get("pinned", 0)
+        edited = m.get("edited", 0)
+
+        pin_tag = yellow("📌 [PINNED] ") if pinned else ""
+        edit_tag = dim(" (edited)") if edited else ""
+        id_tag = dim(f"(ID: {msg_id[:8]})")
+
+        print(f"{dim(f'[{time_part}]')} {id_tag} {cyan(sender)}: {pin_tag}")
+        if reply_to:
+            print(f"  {dim('↳ Replying to: ' + reply_to[:8])}")
+        print(f"{content}{edit_tag}\n")
+
+
+def render_search_results(query: str, results: List[Dict[str, Any]]) -> None:
+    """Renders message search results."""
+    print(bold(f"\nSearch results for: {query}\n"))
+    if not results:
+        print(dim("No matching messages found."))
+        print()
+        return
+
+    for m in results:
+        ts = m.get("timestamp", "")
+        time_part = ts[11:16] if len(ts) >= 16 else ts
+        sender = sanitize_terminal_text(m.get("sender_name", "Unknown"))
+        room = m.get("room_id", "general").upper()
+        msg_id = m.get("message_id", "")
+        content = sanitize_terminal_text(m.get("content", ""))
+
+        print(f"{dim(f'[{time_part}]')} [{cyan(room)}] {dim(f'(ID: {msg_id[:8]})')} {bold(sender)}:")
+        print(f"{content}\n")
+
+
+def render_unread(unread: Dict[str, int]) -> None:
+    """Renders unread message counts per room."""
+    print(bold("\nUnread Messages\n"))
+    if not unread or all(v == 0 for v in unread.values()):
+        print(dim("No unread messages."))
+        print()
+        return
+
+    for room, count in unread.items():
+        if count > 0:
+            print(f"{room:<16}: {yellow(str(count))}")
+    print()
+
+
+def format_announcement(sender: str, content: str) -> str:
+    """Formats prominent announcement banner as a string."""
+    clean_sender = sanitize_terminal_text(sender)
+    clean_content = sanitize_terminal_text(content)
+    width = 54
+    border_top = "╔" + "═" * (width - 2) + "╗"
+    title_line = f"║{'HOST ANNOUNCEMENT':^{width-2}}║"
+    border_mid = "╠" + "═" * (width - 2) + "╣"
+    sender_line = f"║  From: {clean_sender:<{width-11}}║"
+    content_line = f"║  {clean_content:<{width-5}}║"
+    border_bot = "╚" + "═" * (width - 2) + "╝"
+
+    return "\n" + "\n".join([
+        yellow(border_top),
+        yellow(title_line),
+        yellow(border_mid),
+        yellow(sender_line),
+        bold(content_line),
+        yellow(border_bot),
+    ]) + "\n"
+
+
+def render_announcement(sender: str, content: str) -> None:
+    """Renders prominent announcement banner."""
+    print(format_announcement(sender, content))
+
+
 def render_info(info: Dict[str, Any]) -> None:
     """Renders formatted NetMash information."""
     print(bold("\nNetMash Information\n"))
-    print(f"{'Version':<16}: {green(str(info.get('version', '1.0.0')))}")
+    print(f"{'Version':<16}: {green(str(info.get('version', __version__)))}")
     print(f"{'Hostname':<16}: {info.get('hostname', '')}")
     if "username" in info:
         print(f"{'Username':<16}: {cyan(info.get('username', ''))}")
@@ -186,6 +454,7 @@ def render_status(status: Dict[str, Any]) -> None:
     print(f"{'Server':<16}: {green(str(status.get('server_status', 'ONLINE')))}")
     print(f"{'Connection':<16}: {green('CONNECTED')}")
     print(f"{'Host':<16}: {status.get('host_name', '')}")
+    print(f"{'Network':<16}: {cyan(status.get('network_name', 'NetMash Local'))}")
     print(f"{'Peers':<16}: {status.get('peers_count', 0)}")
     print(f"{'Groups':<16}: {status.get('groups_count', 0)}")
     print(f"{'Room':<16}: {cyan(str(status.get('room', 'GENERAL')).upper())}")
@@ -193,30 +462,276 @@ def render_status(status: Dict[str, Any]) -> None:
     print()
 
 
+def render_admin_menu() -> None:
+    """Renders the NetMash Admin interactive menu."""
+    print(bold("\nNetMash Admin"))
+    print(gray("────────────────────────"))
+    print(f" {cyan('1.')} Server Status")
+    print(f" {cyan('2.')} Connected Users")
+    print(f" {cyan('3.')} Groups")
+    print(f" {cyan('4.')} Sessions")
+    print(f" {cyan('5.')} Moderation")
+    print(f" {cyan('6.')} Messages")
+    print(f" {cyan('7.')} Network Diagnostics")
+    print(f" {cyan('8.')} Logs")
+    print(f" {cyan('9.')} Statistics")
+    print(f" {cyan('10.')} Configuration")
+    print(f" {cyan('11.')} Shutdown Server")
+    print(f" {cyan('12.')} Logout")
+    print()
+
+
+def render_admin_status(status_data: Dict[str, Any]) -> None:
+    """Renders formatted Server Status."""
+    print(bold("\nServer Status"))
+    print(gray("─────────────"))
+    print(f"{'Status':<22}: {green(str(status_data.get('status', 'ONLINE')))}")
+    print(f"{'Uptime':<22}: {status_data.get('uptime', '00:00:00')}")
+    print(f"{'Host':<22}: {status_data.get('host', 'Host')}")
+    print(f"{'Version':<22}: {status_data.get('version', __version__)}")
+    print(f"{'Active Connections':<22}: {status_data.get('active_connections', 0)}")
+    print(f"{'Active Groups':<22}: {status_data.get('active_groups', 0)}")
+    print(f"{'Messages Processed':<22}: {status_data.get('messages_processed', 0)}")
+    print()
+
+
+def render_admin_users(users: List[Dict[str, Any]]) -> None:
+    """Renders administrative view of connected users with immutable node IDs and groups."""
+    print(bold("\nUsers Online"))
+    print(gray("────────────"))
+    if not users:
+        print(dim("No users connected."))
+        print()
+        return
+    print(f"{bold('NODE ID'):<18} {bold('USERNAME'):<16} {bold('STATUS'):<10} {bold('GROUP'):<12} {bold('CONNECTED SINCE')}")
+    print(gray("─" * 74))
+    for u in users:
+        nid = u.get("node_id", "")[:16]
+        uname = sanitize_terminal_text(u.get("username", ""))[:14]
+        st = u.get("status", "ONLINE")
+        st_str = green("ONLINE") if st == "ONLINE" else (yellow(st) if st == "AWAY" else red(st))
+        room = sanitize_terminal_text(u.get("current_room", "general"))[:10]
+        conn_since = u.get("connected_at", "")
+        if len(conn_since) >= 19:
+            conn_since = conn_since[11:19]
+        print(f"{dim(nid):<27} {cyan(uname):<25} {st_str:<19} {room:<12} {conn_since}")
+    print()
+
+
+def render_admin_groups(groups: List[Dict[str, Any]]) -> None:
+    """Renders administrative view of groups with owner and creation time."""
+    print(bold("\nGroups"))
+    print(gray("──────"))
+    if not groups:
+        print(dim("No groups available."))
+        print()
+        return
+    print(f"{bold('NAME'):<18} {bold('OWNER'):<16} {bold('MEMBERS'):<10} {bold('ACCESS'):<10} {bold('CREATED')}")
+    print(gray("─" * 72))
+    for g in groups:
+        name = sanitize_terminal_text(g.get("name", ""))[:16]
+        owner = sanitize_terminal_text(g.get("owner", "Host"))[:14]
+        members = str(g.get("member_count", g.get("members", 0)))
+        access = g.get("access", "PUBLIC")
+        access_str = yellow("PIN") if access == "PIN" else green("PUBLIC")
+        created = g.get("created_at", "")
+        if len(created) >= 19:
+            created = created[11:19]
+        print(f"{cyan(name):<27} {owner:<16} {members:<10} {access_str:<19} {created}")
+    print()
+
+
+def render_admin_sessions(sessions: List[Dict[str, Any]]) -> None:
+    """Renders active client sessions without exposing secrets/tokens."""
+    print(bold("\nActive Sessions"))
+    print(gray("───────────────"))
+    if not sessions:
+        print(dim("No active sessions."))
+        print()
+        return
+    print(f"{bold('SESSION ID'):<14} {bold('NODE ID'):<16} {bold('USERNAME'):<14} {bold('REMOTE ADDR'):<18} {bold('ROOM'):<10} {bold('STATUS')}")
+    print(gray("─" * 84))
+    for s in sessions:
+        sid = s.get("session_id", "")[:12]
+        nid = s.get("node_id", "")[:14]
+        uname = sanitize_terminal_text(s.get("username", ""))[:12]
+        addr = str(s.get("remote_addr", ""))[:16]
+        room = sanitize_terminal_text(s.get("current_room", "general"))[:8]
+        st = s.get("status", "ACTIVE")
+        st_str = green(st) if st == "ACTIVE" else yellow(st)
+        print(f"{dim(sid):<23} {dim(nid):<25} {cyan(uname):<23} {addr:<18} {room:<10} {st_str}")
+    print()
+
+
+def render_admin_diagnostics(diag: Dict[str, Any]) -> None:
+    """Renders administrative network and system diagnostics."""
+    print(bold("\nNetwork Diagnostics"))
+    print(gray("───────────────────"))
+    print(f"{'Server Address':<22}: {green(str(diag.get('server_address', '127.0.0.1')))}")
+    print(f"{'Listening Port':<22}: {diag.get('listening_port', DEFAULT_HOST_PORT)}")
+    print(f"{'Discovery Port':<22}: {diag.get('discovery_port', DEFAULT_DISCOVERY_PORT)}")
+    print(f"{'WebSocket / Sockets':<22}: {green(str(diag.get('websocket_status', 'ONLINE')))}")
+    print(f"{'Database Status':<22}: {green(str(diag.get('database_status', 'HEALTHY')))}")
+    print(f"{'Connected Clients':<22}: {diag.get('connected_clients', 0)}")
+    lat = diag.get("latency_ms", 0.0)
+    lat_str = f"{lat}ms" if lat > 0 else "<1ms"
+    print(f"{'Latency':<22}: {lat_str}")
+    print()
+
+
+def render_admin_logs(logs: List[Dict[str, Any]]) -> None:
+    """Renders server audit logs."""
+    print(bold("\nServer Audit Logs"))
+    print(gray("─────────────────"))
+    if not logs:
+        print(dim("No logs recorded."))
+        print()
+        return
+    for l in logs:
+        ts = l.get("timestamp", "")
+        time_part = ts[11:19] if len(ts) >= 19 else ts
+        lvl = l.get("level", "INFO")
+        lvl_str = green(lvl) if lvl == "INFO" else (yellow(lvl) if lvl == "WARNING" else red(lvl))
+        msg = sanitize_terminal_text(l.get("message", ""))
+        print(f"{dim(f'[{time_part}]')} [{lvl_str}] {msg}")
+    print()
+
+
+def render_admin_stats(stats: Dict[str, Any]) -> None:
+    """Renders server administrative statistics."""
+    print(bold("\nNetMash Statistics"))
+    print(gray("──────────────────"))
+    print(f"{'Users':<20}: {stats.get('users_count', 0)}")
+    print(f"{'Online':<20}: {green(str(stats.get('online_count', 0)))}")
+    print(f"{'Groups':<20}: {stats.get('groups_count', 0)}")
+    print(f"{'Messages':<20}: {stats.get('messages_count', 0)}")
+    print(f"{'DMs':<20}: {stats.get('dms_count', 0)}")
+    print(f"{'Files':<20}: {stats.get('files_count', 0)}")
+    print(f"{'Active Connections':<20}: {stats.get('active_connections', 0)}")
+    print(f"{'Server Uptime':<20}: {stats.get('uptime', '00:00:00')}")
+    print()
+
+
+def render_admin_config(cfg: Dict[str, Any]) -> None:
+    """Renders safe server configuration parameters."""
+    print(bold("\nServer Configuration"))
+    print(gray("────────────────────"))
+    for k, v in cfg.items():
+        print(f"{k:<22}: {v}")
+    print()
+
+
+def render_theme_list() -> None:
+    """Renders the centralized theme registry card showing all available themes and current active theme."""
+    themes = get_all_themes()
+    active = get_active_theme()
+    count = len(themes)
+    width = 42
+
+    print()
+    print(active.border("╭" + "─" * width + "╮"))
+    print(active.border("│") + active.header(f"{'NETMASH THEMES':^{width}}") + active.border("│"))
+    print(active.border("├" + "─" * width + "┤"))
+    for t in themes:
+        prefix = f"  {t.id}." if t.id < 10 else f" {t.id}."
+        raw_line = f"{prefix} {t.name}"
+        if t.id == active.id:
+            formatted_item = active.accent(f"{raw_line:<{width}}")
+        else:
+            formatted_item = f"{raw_line:<{width}}"
+        print(active.border("│") + formatted_item + active.border("│"))
+    print(active.border("├" + "─" * width + "┤"))
+    cur_line = f" Current: {active.name}"
+    print(active.border("│") + active.accent(f"{cur_line:<{width}}") + active.border("│"))
+    print(active.border("╰" + "─" * width + "╯"))
+    print()
+    print(active.bold("Usage:"))
+    print(f"  {active.primary(f'/theme 1-{count}')}")
+    print(f"  {active.primary('/theme random')}\n")
+
+
+def render_invalid_theme() -> None:
+    """Renders error and dynamic theme list for invalid /theme inputs."""
+    themes = get_all_themes()
+    active = get_active_theme()
+    count = len(themes)
+
+    print(active.error("\nInvalid theme.\n"))
+    print(active.bold("Available themes:"))
+    for t in themes:
+        print(f"{t.id}. {t.name}")
+    print()
+    print(active.bold("Use:"))
+    print(f"  {active.primary(f'/theme 1-{count}')}")
+    print(f"  {active.primary('/theme random')}\n")
+
+
 def print_help() -> None:
-    """Prints interactive chat commands."""
-    print(bold("\nInteractive Commands:"))
-    print(f"  {cyan('/help')}                    Show this help message")
-    print(f"  {cyan('/users')}, {cyan('/peers')}           List connected peers")
-    print(f"  {cyan('/groups')}                  List all available groups")
-    print(f"  {cyan('/create <name> [pin]')}     Create a new group (public or PIN-protected)")
-    print(f"  {cyan('/create-pin <name> <pin>')} Quick-create a 4-digit PIN protected group")
-    print(f"  {cyan('/join <name> [pin]')}       Join a group (or switch to it)")
-    print(f"  {cyan('/switch <name>')}           Switch active room (e.g. /switch general or /switch dev)")
-    print(f"  {cyan('/general')}                 Quick jump back to GENERAL room")
-    print(f"  {cyan('/leave [name]')}            Leave group and return to GENERAL")
-    print(f"  {cyan('/setpin <name> [pin]')}     Set or update 4-digit PIN for your group (owner only)")
-    print(f"  {cyan('/removepin <name>')}        Remove PIN and make group public (owner only)")
-    print(f"  {cyan('/dm <user> [msg]')}         Direct message a peer")
-    print(f"  {cyan('/room')}                    Show current active room")
-    print(f"  {cyan('/name <new_name>')}         Change your display name")
-    print(f"  {cyan('/update')}                  Check and install latest update from GitHub")
-    print(f"  {cyan('/check-update')}            Check for updates without installing")
-    print(f"  {cyan('/restart')}                 Restart NetMash session")
-    print(f"  {cyan('/info')}                    Show local node and network info")
-    print(f"  {cyan('/status')}                  Show server status")
-    print(f"  {cyan('/clear')}                   Clear terminal screen")
-    print(f"  {cyan('/exit')}, {cyan('/quit')}           Disconnect and exit")
+    """Prints categorized interactive chat commands."""
+    theme_count = get_theme_count()
+    print(bold("\nInteractive Commands\n"))
+
+    print(bold("General"))
+    print(f"  {cyan('/help')}                       Show this help message")
+    print(f"  {cyan('/users')}, {cyan('/peers')}              List connected peers and latency")
+    print(f"  {cyan('/groups')}                     List all available groups")
+    print(f"  {cyan('/room')}                       Show current active room")
+    print(f"  {cyan('/general')}                    Quick jump back to GENERAL room")
+    print(f"  {cyan('/online')}                     View online peers or set status to ONLINE")
+    print(f"  {cyan('/whoami')}                     Show your persistent node identity")
+
+    print(bold("\nGroups"))
+    print(f"  {cyan('/create <name> [pin]')}        Create a new group (public or PIN-protected)")
+    print(f"  {cyan('/create-pin <name> <pin>')}    Quick-create a 4-digit PIN protected group")
+    print(f"  {cyan('/join <name> [pin]')}          Join a group (or switch to it)")
+    print(f"  {cyan('/switch <name>')}              Switch active room without re-entering PIN")
+    print(f"  {cyan('/leave [name]')}               Leave group and return to GENERAL")
+    print(f"  {cyan('/members [name]')}             Show group owner, moderators, and members")
+    print(f"  {cyan('/setpin <name> [pin]')}        Set or update 4-digit PIN (owner only)")
+    print(f"  {cyan('/removepin <name>')}           Remove PIN and make group public (owner only)")
+    print(f"  {cyan('/kick <user>')}                Kick member from group (owner/moderator)")
+    print(f"  {cyan('/ban <user>')}                 Ban member from group (owner/moderator)")
+    print(f"  {cyan('/unban <user>')}               Unban member from group (owner only)")
+    print(f"  {cyan('/delete [group]')}             Permanently delete group (owner only)")
+    print(f"  {cyan('/announce <msg>')}             Broadcast announcement banner to room")
+
+    print(bold("\nCommunication"))
+    print(f"  {cyan('/dm <user> [msg]')}            Direct message a peer")
+    print(f"  {cyan('/history [limit]')}            View recent message history in room")
+    print(f"  {cyan('/search <text>')}              Search message history across accessible rooms")
+    print(f"  {cyan('/unread')}                     View unread message counts per room")
+    print(f"  {cyan('/reply <msg_id> <msg>')}       Reply to a specific message")
+    print(f"  {cyan('/edit <msg_id> <new_msg>')}    Edit your previously sent message")
+    print(f"  {cyan('/delete <msg_id>')}            Delete a message (soft delete)")
+    print(f"  {cyan('/pin <msg_id>')}               Pin an important message in room")
+    print(f"  {cyan('/unpin <msg_id>')}             Unpin a message in room")
+    print(f"  {cyan('/send <file>')}                Securely send file to peer or room")
+
+    print(bold("\nPresence & Notifications"))
+    print(f"  {cyan('/away')}                       Set status to AWAY")
+    print(f"  {cyan('/busy')}                       Set status to BUSY")
+    print(f"  {cyan('/mute <room>')}                Mute notification indicators for a room")
+    print(f"  {cyan('/unmute <room>')}              Unmute notification indicators for a room")
+    print(f"  {cyan('/notify on|off')}              Toggle terminal message notifications")
+
+    print(bold("\nNetwork & Diagnostics"))
+    print(f"  {cyan('/info')}                       Show local node and platform info")
+    print(f"  {cyan('/netinfo')}                    Show local network interfaces and subnet")
+    print(f"  {cyan('/status')}                     Show host status and uptime")
+    print(f"  {cyan('/stats')}                      Show network throughput and server metrics")
+    print(f"  {cyan('/diagnose')}                   Run full diagnostic suite & remediation hints")
+    print(f"  {cyan('/reconnect')}                  Reconnect to host or discover new host")
+    print(f"  {cyan('/network-name <name>')}        Rename LAN session network name")
+
+    print(bold("\nApplication"))
+    print(f"  {cyan('/name <new_name>')}            Change your display name")
+    print(f"  {cyan(f'/theme [1-{theme_count}|random]')}   Change terminal theme")
+    print(f"  {cyan('/version')}                    Show NetMash, Python, and platform versions")
+    print(f"  {cyan('/check-update')}               Check GitHub for updates without installing")
+    print(f"  {cyan('/update')}                     Download and apply update from GitHub")
+    print(f"  {cyan('/restart')}                    Restart NetMash session")
+    print(f"  {cyan('/clear')}                      Clear terminal screen")
+    print(f"  {cyan('/exit')}, {cyan('/quit')}              Disconnect and exit")
     print()
 
 
@@ -229,37 +744,76 @@ async def run_interactive_chat(
     client: NetMashClient, server: Optional[Any] = None
 ) -> None:
     """
-    Main interactive terminal chat loop.
-    Asynchronously prints incoming messages while accepting user input.
+    Main interactive terminal chat loop with complete command handling.
     """
+    load_saved_theme()
     print_banner()
-    peers_count = client.server_info.get("peers_count", 1)
     host_name = client.server_info.get("host_name", "Host")
+    network_title = client.server_info.get("network_name", "NetMash")
 
-    print_divider(f"NetMash | {client.current_room.upper()} | Host: {host_name}")
+    print_divider(f"{network_title} | {client.current_room.upper()} | Host: {host_name}")
     print(dim(f"You are: {client.identity.username} ({client.identity.hostname})"))
-    print(dim("Type a message to chat, or /help for available commands.\n"))
+    # Admin session state
+    is_admin_mode: bool = False
+
+    def get_active_prompt() -> str:
+        """
+        Dynamically generates the prompt containing the currently active room/group.
+        Format:
+          Normal: netmash><active_room>> 
+          Admin:  netmash[ADMIN]><active_room>> 
+        Single source of truth is client.current_room and is_admin_mode.
+        Uses active theme styling for prompt components.
+        """
+        room = (client.current_room or "general").lower().strip()
+        t = get_active_theme()
+        if is_admin_mode:
+            return f"{t.error('netmash[ADMIN]')}>{t.prompt(room)}> "
+        return f"{t.prompt('netmash')}>{t.prompt(room)}> "
 
     history_file = get_app_dir() / "history.txt"
-    _setup_readline(history_file)
+    input_manager = TerminalInputManager(
+        prompt=get_active_prompt,
+        history_file=history_file,
+        completer_words=SLASH_COMMANDS,
+    )
 
-    # Set up client event callbacks for formatted message display
+    # State tracking
+    muted_rooms: Set[str] = set()
+    notifications_enabled: bool = True
+    unread_counts: Dict[str, int] = {}
+    current_status: str = "ONLINE"
+
+    # Pending file downloads
+    incoming_transfers: Dict[str, Dict[str, Any]] = {}
+
+    # Event Callbacks
     def on_chat(msg: NetMashMessage) -> None:
         payload = msg.payload
-        room = sanitize_terminal_text(payload.get("room", "general")).upper()
+        room = sanitize_terminal_text(payload.get("room", "general")).lower()
         sender = sanitize_terminal_text(payload.get("sender_name", "Unknown"))
         content = sanitize_terminal_text(payload.get("content", ""))
+        msg_id = payload.get("message_id", "")
+        reply_to = payload.get("reply_to")
 
         now_str = datetime.datetime.now().strftime("%H:%M")
         is_self = payload.get("sender_id") == client.identity.node_id
 
-        sender_label = green(f"{sender} (You)") if is_self else cyan(sender)
-        room_tag = f"[{room}] " if room.lower() != client.current_room.lower() else ""
+        # Track unread
+        if room != client.current_room.lower():
+            unread_counts[room] = unread_counts.get(room, 0) + 1
+            if notifications_enabled and room not in muted_rooms:
+                input_manager.print_event(yellow(f"🔔 New message in [{room.upper()}] from {sender}"))
+            return
 
-        # Erase current prompt line, print message, re-prompt
-        sys.stdout.write(f"\r\033[K{dim(f'[{now_str}]')} {room_tag}{sender_label}:\n{content}\n\n")
-        sys.stdout.write(f"{cyan('netmash')}> ")
-        sys.stdout.flush()
+        sender_label = green(f"{sender} (You)") if is_self else cyan(sender)
+        id_tag = dim(f"({msg_id[:8]}) ") if msg_id else ""
+
+        event_text = f"{dim(f'[{now_str}]')} {id_tag}{sender_label}:\n"
+        if reply_to:
+            event_text += f"{dim(f'↳ Replying to: {reply_to[:8]}')}\n"
+        event_text += f"{content}\n"
+        input_manager.print_event(event_text)
 
     def on_dm(msg: NetMashMessage) -> None:
         payload = msg.payload
@@ -269,75 +823,358 @@ async def run_interactive_chat(
         now_str = datetime.datetime.now().strftime("%H:%M")
 
         is_sender = payload.get("sender_id") == client.identity.node_id
-        if is_sender:
-            tag = magenta(f"[DM to {target}]")
-        else:
-            tag = magenta(f"[DM from {sender}]")
+        tag = magenta(f"[DM to {target}]") if is_sender else magenta(f"[DM from {sender}]")
 
-        sys.stdout.write(f"\r\033[K{dim(f'[{now_str}]')} {tag}:\n{content}\n\n")
-        sys.stdout.write(f"{cyan('netmash')}> ")
-        sys.stdout.flush()
+        input_manager.print_event(f"{dim(f'[{now_str}]')} {tag}:\n{content}\n")
+
+    def on_presence(msg: NetMashMessage) -> None:
+        user = sanitize_terminal_text(msg.payload.get("username", ""))
+        st = msg.payload.get("status", "ONLINE")
+        st_color = green(st) if st == "ONLINE" else (yellow(st) if st == "AWAY" else red(st))
+        input_manager.print_event(gray(f"• {user} is now {st_color}"))
+
+    def on_edit(msg: NetMashMessage) -> None:
+        mid = msg.payload.get("message_id", "")[:8]
+        new_c = sanitize_terminal_text(msg.payload.get("content", ""))
+        input_manager.print_event(gray(f"✎ Message ({mid}) edited: {new_c}"))
+
+    def on_delete(msg: NetMashMessage) -> None:
+        mid = msg.payload.get("message_id", "")[:8]
+        input_manager.print_event(gray(f"🗑 Message ({mid}) was deleted"))
+
+    def on_pin(msg: NetMashMessage) -> None:
+        pinned = msg.payload.get("pinned", True)
+        mid = msg.payload.get("message_id", "")[:8]
+        cnt = sanitize_terminal_text(msg.payload.get("content", ""))
+        if pinned:
+            input_manager.print_event(yellow(f"📌 Message pinned ({mid}): {cnt}"))
+        else:
+            input_manager.print_event(gray(f"Message ({mid}) unpinned"))
+
+    def on_announce(msg: NetMashMessage) -> None:
+        sender = msg.payload.get("sender_name", "Host")
+        cnt = msg.payload.get("content", "")
+        input_manager.print_event(format_announcement(sender, cnt))
+
+    def on_netname(msg: NetMashMessage) -> None:
+        new_n = sanitize_terminal_text(msg.payload.get("network_name", "NetMash"))
+        input_manager.print_event(cyan(f"Network session renamed to: {new_n}"))
+
+    def on_file_off(msg: NetMashMessage) -> None:
+        fid = msg.payload.get("file_id", "")
+        fname = sanitize_filename(msg.payload.get("name", "file"))
+        size = msg.payload.get("size", 0)
+        sha = msg.payload.get("sha256", "")
+        sender = msg.payload.get("sender_name", "Peer")
+
+        size_mb = round(size / (1024.0 * 1024.0), 2)
+        incoming_transfers[fid] = {
+            "name": fname,
+            "size": size,
+            "sha256": sha,
+            "sender": sender,
+            "chunks": {},
+            "status": "pending",
+        }
+
+        offer_text = (
+            f"{yellow('📥 Incoming File Transfer Offer:')}\n"
+            f"  From    : {cyan(sender)}\n"
+            f"  Filename: {fname}\n"
+            f"  Size    : {size_mb} MB ({size} bytes)\n"
+            f"  SHA-256 : {dim(sha[:16])}...\n"
+            f"  Type {green('/accept ' + fid[:8])} or {red('/reject ' + fid[:8])}\n"
+        )
+        input_manager.print_event(offer_text)
+
+    def on_file_chk(msg: NetMashMessage) -> None:
+        import base64
+        fid = msg.payload.get("file_id", "")
+        idx = msg.payload.get("chunk_index", 0)
+        data_b64 = msg.payload.get("data", "")
+        if fid in incoming_transfers:
+            raw = base64.b64decode(data_b64)
+            incoming_transfers[fid]["chunks"][idx] = raw
+
+    def on_file_cmp(msg: NetMashMessage) -> None:
+        fid = msg.payload.get("file_id", "")
+        if fid in incoming_transfers:
+            info = incoming_transfers[fid]
+            chunks = info["chunks"]
+            dl_dir = get_downloads_dir()
+            clean_name = sanitize_filename(info["name"])
+            out_path = dl_dir / clean_name
+
+            with open(out_path, "wb") as f:
+                for idx in sorted(chunks.keys()):
+                    f.write(chunks[idx])
+
+            calc_sha = calculate_sha256(out_path)
+            if calc_sha == info["sha256"]:
+                input_manager.print_event(
+                    f"{green(f'✓ File received successfully: {clean_name}')}\n"
+                    + dim(f"  Saved to: {out_path}\n")
+                )
+            else:
+                input_manager.print_event(red(f"✗ Integrity check failed for {clean_name}\n"))
 
     def on_join(msg: NetMashMessage) -> None:
         user = sanitize_terminal_text(msg.payload.get("username", "Someone"))
-        sys.stdout.write(f"\r\033[K{gray(f'→ {user} joined NetMash')}\n")
-        sys.stdout.write(f"{cyan('netmash')}> ")
-        sys.stdout.flush()
+        input_manager.print_event(gray(f"→ {user} joined NetMash"))
 
     def on_leave(msg: NetMashMessage) -> None:
         user = sanitize_terminal_text(msg.payload.get("username", "Someone"))
-        sys.stdout.write(f"\r\033[K{gray(f'← {user} left NetMash')}\n")
-        sys.stdout.write(f"{cyan('netmash')}> ")
-        sys.stdout.flush()
+        input_manager.print_event(gray(f"← {user} left NetMash"))
 
     def on_name(msg: NetMashMessage) -> None:
         old_name = sanitize_terminal_text(msg.payload.get("old_name", ""))
         new_name = sanitize_terminal_text(msg.payload.get("new_name", ""))
-        sys.stdout.write(f"\r\033[K{gray(f'• {old_name} is now known as {new_name}')}\n")
-        sys.stdout.write(f"{cyan('netmash')}> ")
-        sys.stdout.flush()
+        input_manager.print_event(gray(f"• {old_name} is now known as {new_name}"))
 
     def on_error(msg: NetMashMessage) -> None:
         err_msg = sanitize_terminal_text(msg.payload.get("message", "An error occurred."))
-        sys.stdout.write(f"\r\033[K{red('Error:')} {err_msg}\n")
-        sys.stdout.write(f"{cyan('netmash')}> ")
-        sys.stdout.flush()
+        input_manager.print_event(f"{red('Error:')} {err_msg}")
 
     client.on_chat_message = on_chat
     client.on_dm = on_dm
+    client.on_presence_update = on_presence
+    client.on_message_edit = on_edit
+    client.on_message_delete = on_delete
+    client.on_message_pin = on_pin
+    client.on_announcement = on_announce
+    client.on_network_name_change = on_netname
+    client.on_file_offer = on_file_off
+    client.on_file_chunk = on_file_chk
+    client.on_file_complete = on_file_cmp
     client.on_peer_join = on_join
     client.on_peer_leave = on_leave
     client.on_name_change = on_name
     client.on_error = on_error
 
-    loop = asyncio.get_running_loop()
+    def on_shutdown(reason: str) -> None:
+        input_manager.print_event(red(f"\n⚠ NetMash Server is shutting down: {reason}\n"))
+
+    client.on_server_shutdown = on_shutdown
 
     # Input loop
     try:
         while client.connected:
             try:
-                user_input = await asyncio.to_thread(input, f"{cyan('netmash')}> ")
+                user_input = await input_manager.get_line()
                 text = user_input.strip()
                 if not text:
                     continue
 
                 if text.startswith("/"):
-                    # Handle slash commands
                     raw_parts = text.split(" ")
                     cmd = raw_parts[0].lower()
                     cmd_args = [p for p in raw_parts[1:] if p]
 
-                    if cmd in ("/exit", "/quit"):
+                    # --- Hidden Admin System ---
+                    if cmd == "/admin":
+                        subcmd = cmd_args[0].lower() if cmd_args else ""
+                        if subcmd == "logout":
+                            if is_admin_mode:
+                                await client.admin_logout()
+                                is_admin_mode = False
+                                print(green("Admin session ended. Logged out."))
+                            else:
+                                print(yellow("Not currently in admin mode."))
+                        elif subcmd == "status":
+                            if is_admin_mode:
+                                st = await client.admin_get_status()
+                                if st:
+                                    render_admin_status(st)
+                                else:
+                                    print(red("Could not retrieve admin status."))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "users":
+                            if is_admin_mode:
+                                us = await client.admin_get_users()
+                                render_admin_users(us)
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "groups":
+                            if is_admin_mode:
+                                gps = await client.admin_get_groups()
+                                render_admin_groups(gps)
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "sessions":
+                            if is_admin_mode:
+                                sess = await client.admin_get_sessions()
+                                render_admin_sessions(sess)
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd in ("moderation", "mod"):
+                            if is_admin_mode:
+                                print(bold("\nAdmin Moderation Controls:"))
+                                print(f"  {cyan('/admin kick <username>')}")
+                                print(f"  {cyan('/admin ban <username>')}")
+                                print(f"  {cyan('/admin unban <username>')}\n")
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "kick":
+                            if is_admin_mode:
+                                if len(cmd_args) < 2:
+                                    print(red("Usage: /admin kick <username>"))
+                                else:
+                                    target_u = cmd_args[1].strip()
+                                    resp = await client.admin_moderation("kick", target_u)
+                                    if resp and resp.get("success"):
+                                        print(green(f"✓ {resp.get('message', f'Kicked {target_u}')}"))
+                                    elif resp:
+                                        print(red(f"✗ {resp.get('message', 'Failed to kick user.')}"))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "ban":
+                            if is_admin_mode:
+                                if len(cmd_args) < 2:
+                                    print(red("Usage: /admin ban <username>"))
+                                else:
+                                    target_u = cmd_args[1].strip()
+                                    resp = await client.admin_moderation("ban", target_u)
+                                    if resp and resp.get("success"):
+                                        print(green(f"✓ {resp.get('message', f'Banned {target_u}')}"))
+                                    elif resp:
+                                        print(red(f"✗ {resp.get('message', 'Failed to ban user.')}"))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "unban":
+                            if is_admin_mode:
+                                if len(cmd_args) < 2:
+                                    print(red("Usage: /admin unban <username>"))
+                                else:
+                                    target_u = cmd_args[1].strip()
+                                    resp = await client.admin_moderation("unban", target_u)
+                                    if resp and resp.get("success"):
+                                        print(green(f"✓ {resp.get('message', f'Unbanned {target_u}')}"))
+                                    elif resp:
+                                        print(red(f"✗ {resp.get('message', 'Failed to unban user.')}"))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd in ("messages", "message-stats"):
+                            if is_admin_mode:
+                                mstats = await client.admin_get_message_stats()
+                                print(bold("\nMessage Administration & Statistics"))
+                                print(gray("───────────────────────────────────"))
+                                print(f"{'Total Messages':<22}: {mstats.get('total_messages', 0)}")
+                                print(f"{'Direct Messages':<22}: {mstats.get('total_dms', 0)}")
+                                print(f"{'File Transfers':<22}: {mstats.get('total_files', 0)}")
+                                print()
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd in ("diagnostics", "diag"):
+                            if is_admin_mode:
+                                diag = await client.admin_get_diagnostics()
+                                if diag:
+                                    render_admin_diagnostics(diag)
+                                else:
+                                    print(red("Could not retrieve diagnostics."))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "logs":
+                            if is_admin_mode:
+                                lgs = await client.admin_get_logs()
+                                render_admin_logs(lgs)
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "stats":
+                            if is_admin_mode:
+                                ast = await client.admin_get_stats()
+                                if ast:
+                                    render_admin_stats(ast)
+                                else:
+                                    print(red("Could not retrieve statistics."))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "config":
+                            if is_admin_mode:
+                                cfg = await client.admin_get_config()
+                                if cfg:
+                                    render_admin_config(cfg)
+                                else:
+                                    print(red("Could not retrieve configuration."))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif subcmd == "shutdown":
+                            if is_admin_mode:
+                                print(yellow("\nShutdown Server"))
+                                confirm = await input_manager.get_line("Are you sure? [y/N]: ")
+                                if confirm.strip().lower() in ("y", "yes"):
+                                    print(red("Initiating server shutdown..."))
+                                    await client.admin_shutdown_server("Admin requested shutdown")
+                                else:
+                                    print(dim("Shutdown cancelled."))
+                            else:
+                                print(red("Admin authentication required. Type /admin first."))
+                        elif not subcmd:
+                            if is_admin_mode:
+                                render_admin_menu()
+                            else:
+                                print(bold("\nAdmin Authentication"))
+                                entered_pass = await input_manager.get_line("Password: ", is_password=True)
+                                auth_res = await client.admin_auth(entered_pass.strip())
+                                if auth_res.get("locked"):
+                                    print(red("\nToo many failed attempts.\nAdmin authentication temporarily locked.\nTry again later.\n"))
+                                elif auth_res.get("success"):
+                                    is_admin_mode = True
+                                    print(green("\nAdmin authentication successful."))
+                                    render_admin_menu()
+                                else:
+                                    print(red("\nAuthentication failed.\n"))
+                        else:
+                            print(yellow(f"Unknown admin subcommand: {subcmd}"))
+
+                    # --- Navigation & General ---
+                    elif cmd in ("/exit", "/quit"):
                         print(yellow("\nDisconnecting from NetMash..."))
                         break
                     elif cmd == "/help":
                         print_help()
+                    elif cmd == "/whoami":
+                        render_whoami(
+                            username=client.identity.username,
+                            node_id=client.identity.node_id,
+                            hostname=client.identity.hostname,
+                            status=current_status,
+                            role="MEMBER",
+                            host=client.server_info.get("host_name", "Host"),
+                        )
                     elif cmd in ("/users", "/peers"):
                         peers = await client.list_peers()
                         render_peers_table(peers)
                     elif cmd == "/groups":
                         groups = await client.list_groups()
                         render_groups_table(groups, current_room=client.current_room)
+                    elif cmd == "/room":
+                        print(f"Current active room: {bright_cyan(client.current_room.upper())}")
+                    elif cmd == "/name":
+                        if not cmd_args:
+                            print(red("Usage: /name <new_name>"))
+                        else:
+                            new_name = cmd_args[0].strip()
+                            await client.change_name(new_name)
+                            print(green(f"✓ Name change requested: {new_name}"))
+                    elif cmd == "/theme":
+                        if not cmd_args:
+                            render_theme_list()
+                        else:
+                            arg = cmd_args[0].strip().lower()
+                            if arg == "random":
+                                prev_t, new_t = set_random_theme(persist=True)
+                                print(f"\n{new_t.bold('Theme changed randomly.')}\n")
+                                print(f"Previous: {prev_t.name}")
+                                print(f"New: {new_t.accent(new_t.name)}\n")
+                            else:
+                                new_theme = set_active_theme(arg, persist=True)
+                                if new_theme:
+                                    print(new_theme.success(f"✓ Theme set to {new_theme.name} ({new_theme.style_desc})."))
+                                else:
+                                    render_invalid_theme()
+
+                    # --- Groups ---
                     elif cmd in ("/create", "/creategroup"):
                         if not cmd_args:
                             print(red("Usage: /create <group_name> [4-digit-pin]"))
@@ -348,10 +1185,10 @@ async def run_interactive_chat(
                                 print(f"Creating group: {cyan(group_name)}")
                                 print("1. Public")
                                 print("2. PIN protected")
-                                choice = await asyncio.to_thread(input, "Select (1/2): ")
+                                choice = await input_manager.get_line("Select (1/2): ")
                                 if choice.strip() == "2":
-                                    pin1 = await asyncio.to_thread(input, "Enter 4-digit PIN: ")
-                                    pin2 = await asyncio.to_thread(input, "Confirm PIN: ")
+                                    pin1 = await input_manager.get_line("Enter 4-digit PIN: ")
+                                    pin2 = await input_manager.get_line("Confirm PIN: ")
                                     if pin1 != pin2:
                                         print(red("PINs do not match. Cancelled."))
                                         continue
@@ -388,29 +1225,29 @@ async def run_interactive_chat(
                             target_group = cmd_args[0].strip()
                             pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
 
-                            # If switching to general
                             if target_group.lower() == "general":
                                 resp = await client.switch_room("general")
                                 if resp and resp.get("success"):
                                     print(green("✓ Switched to GENERAL room."))
+                                    unread_counts["general"] = 0
                                 continue
 
-                            # Try room switch first (in case already a member)
                             switch_resp = await client.switch_room(target_group)
                             if switch_resp and switch_resp.get("success"):
                                 print(green(f"✓ Switched to room '{target_group}'. Current room: {client.current_room.upper()}"))
+                                unread_counts[target_group.lower()] = 0
                                 continue
 
-                            # Otherwise try join
                             resp = await client.join_group(target_group, pin=pin)
                             if resp and resp.get("requires_pin") and pin is None:
-                                pin_input = await asyncio.to_thread(
-                                    input, f"Group '{target_group}' requires a PIN. Enter 4-digit PIN: "
+                                pin_input = await input_manager.get_line(
+                                    f"Group '{target_group}' requires a PIN. Enter 4-digit PIN: "
                                 )
                                 resp = await client.join_group(target_group, pin=pin_input.strip())
 
                             if resp and resp.get("success"):
                                 print(green(f"✓ Joined '{target_group}'. Current room: {client.current_room.upper()}"))
+                                unread_counts[target_group.lower()] = 0
                             elif resp:
                                 print(red(f"✗ {resp.get('message')}"))
                             else:
@@ -419,35 +1256,9 @@ async def run_interactive_chat(
                         resp = await client.switch_room("general")
                         if resp and resp.get("success"):
                             print(green("✓ Returned to GENERAL room."))
+                            unread_counts["general"] = 0
                         else:
                             print(red("Could not switch to GENERAL."))
-                    elif cmd == "/setpin":
-                        if not cmd_args:
-                            print(red("Usage: /setpin <group_name> [new-4-digit-pin]"))
-                        else:
-                            group_name = cmd_args[0].strip()
-                            new_pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
-                            if new_pin is None:
-                                new_pin = await asyncio.to_thread(input, f"Enter new 4-digit PIN for '{group_name}': ")
-                            resp = await client.set_group_pin(group_name, pin=new_pin.strip())
-                            if resp and resp.get("success"):
-                                print(green(f"✓ {resp.get('message')}"))
-                            elif resp:
-                                print(red(f"✗ {resp.get('message')}"))
-                            else:
-                                print(red("Failed to set group PIN."))
-                    elif cmd == "/removepin":
-                        if not cmd_args:
-                            print(red("Usage: /removepin <group_name>"))
-                        else:
-                            group_name = cmd_args[0].strip()
-                            resp = await client.set_group_pin(group_name, pin=None)
-                            if resp and resp.get("success"):
-                                print(green(f"✓ {resp.get('message')}"))
-                            elif resp:
-                                print(red(f"✗ {resp.get('message')}"))
-                            else:
-                                print(red("Failed to remove group PIN."))
                     elif cmd == "/leave":
                         target_group = cmd_args[0].strip() if cmd_args else client.current_room
                         if target_group.lower() == "general":
@@ -458,6 +1269,99 @@ async def run_interactive_chat(
                                 print(green(f"✓ Left '{target_group}'. Returned to GENERAL."))
                             elif resp:
                                 print(red(f"✗ {resp.get('message')}"))
+                    elif cmd == "/members":
+                        grp = cmd_args[0].strip() if cmd_args else client.current_room
+                        mem_data = await client.get_members(grp)
+                        if mem_data:
+                            render_members(mem_data)
+                        else:
+                            print(red(f"Could not retrieve members for '{grp}'."))
+                    elif cmd == "/setpin":
+                        if not cmd_args:
+                            print(red("Usage: /setpin <group_name> [new-4-digit-pin]"))
+                        else:
+                            group_name = cmd_args[0].strip()
+                            new_pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+                            if new_pin is None:
+                                new_pin = await input_manager.get_line(f"Enter new 4-digit PIN for '{group_name}': ")
+                            resp = await client.set_group_pin(group_name, pin=new_pin.strip())
+                            if resp and resp.get("success"):
+                                print(green(f"✓ {resp.get('message')}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                    elif cmd == "/removepin":
+                        if not cmd_args:
+                            print(red("Usage: /removepin <group_name>"))
+                        else:
+                            group_name = cmd_args[0].strip()
+                            resp = await client.set_group_pin(group_name, pin=None)
+                            if resp and resp.get("success"):
+                                print(green(f"✓ {resp.get('message')}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                    elif cmd == "/kick":
+                        if not cmd_args:
+                            print(red("Usage: /kick <user>"))
+                        else:
+                            target_u = cmd_args[0].strip()
+                            resp = await client.kick_member(client.current_room, target_u)
+                            if resp and resp.get("success"):
+                                print(green(f"✓ {resp.get('message')}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                    elif cmd == "/ban":
+                        if not cmd_args:
+                            print(red("Usage: /ban <user>"))
+                        else:
+                            target_u = cmd_args[0].strip()
+                            resp = await client.ban_member(client.current_room, target_u)
+                            if resp and resp.get("success"):
+                                print(green(f"✓ {resp.get('message')}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                    elif cmd == "/unban":
+                        if not cmd_args:
+                            print(red("Usage: /unban <user>"))
+                        else:
+                            target_u = cmd_args[0].strip()
+                            resp = await client.unban_member(client.current_room, target_u)
+                            if resp and resp.get("success"):
+                                print(green(f"✓ {resp.get('message')}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                    elif cmd == "/delete":
+                        # If argument provided, treat as group delete; otherwise if message ID, delete message
+                        if not cmd_args:
+                            print(red("Usage: /delete <group_name> OR /delete <message_id>"))
+                        else:
+                            target = cmd_args[0].strip()
+                            # Check if it's a message ID or group
+                            if len(target) > 8 and "-" in target:
+                                # Message deletion
+                                await client.delete_message(target)
+                                print(green(f"✓ Delete request sent for message: {target[:8]}"))
+                            else:
+                                # Group deletion confirmation
+                                print(yellow(f"\nDelete group '{target}'?\nThis will remove the group for all members."))
+                                conf = await input_manager.get_line("Confirm [y/N]: ")
+                                if conf.strip().lower() in ("y", "yes"):
+                                    resp = await client.delete_group(target)
+                                    if resp and resp.get("success"):
+                                        print(green(f"✓ Group '{target}' deleted."))
+                                        if client.current_room.lower() == target.lower():
+                                            client.current_room = "general"
+                                    elif resp:
+                                        print(red(f"✗ {resp.get('message')}"))
+                                else:
+                                    print(dim("Group deletion cancelled."))
+                    elif cmd == "/announce":
+                        if not cmd_args:
+                            print(red("Usage: /announce <message>"))
+                        else:
+                            ann_msg = " ".join(cmd_args).strip()
+                            await client.announce(ann_msg, room=client.current_room)
+
+                    # --- Communication & History ---
                     elif cmd == "/dm":
                         if not cmd_args:
                             print(red("Usage: /dm <username> [message]"))
@@ -467,20 +1371,256 @@ async def run_interactive_chat(
                                 dm_content = " ".join(cmd_args[1:]).strip()
                                 await client.send_dm(target_user, dm_content)
                             else:
-                                dm_content = await asyncio.to_thread(
-                                    input, f"Enter message for {target_user}: "
+                                dm_content = await input_manager.get_line(
+                                    f"Enter message for {target_user}: "
                                 )
                                 if dm_content.strip():
                                     await client.send_dm(target_user, dm_content.strip())
-                    elif cmd == "/room":
-                        print(f"Current active room: {bright_cyan(client.current_room.upper())}")
-                    elif cmd == "/name":
+                    elif cmd == "/history":
+                        limit = int(cmd_args[0]) if cmd_args and cmd_args[0].isdigit() else 30
+                        msgs = await client.get_history(client.current_room, limit=limit)
+                        render_history(msgs)
+                    elif cmd == "/search":
                         if not cmd_args:
-                            print(red("Usage: /name <new_name>"))
+                            print(red("Usage: /search <query>"))
                         else:
-                            new_name = cmd_args[0].strip()
-                            await client.change_name(new_name)
-                            print(green(f"✓ Name change requested: {new_name}"))
+                            q = " ".join(cmd_args).strip()
+                            res = await client.search_messages(q)
+                            render_search_results(q, res)
+                    elif cmd == "/unread":
+                        render_unread(unread_counts)
+                    elif cmd == "/reply":
+                        if len(cmd_args) < 2:
+                            print(red("Usage: /reply <message_id> <message>"))
+                        else:
+                            reply_mid = cmd_args[0].strip()
+                            r_content = " ".join(cmd_args[1:]).strip()
+                            await client.send_chat(r_content, room=client.current_room, reply_to=reply_mid)
+                    elif cmd == "/edit":
+                        if len(cmd_args) < 2:
+                            print(red("Usage: /edit <message_id> <new_message>"))
+                        else:
+                            edit_mid = cmd_args[0].strip()
+                            new_c = " ".join(cmd_args[1:]).strip()
+                            await client.edit_message(edit_mid, new_c)
+                    elif cmd == "/pin":
+                        if not cmd_args:
+                            print(red("Usage: /pin <message_id>"))
+                        else:
+                            pin_mid = cmd_args[0].strip()
+                            await client.pin_message(pin_mid, is_pinned=True)
+                            print(green(f"✓ Pinned message: {pin_mid[:8]}"))
+                    elif cmd == "/unpin":
+                        if not cmd_args:
+                            print(red("Usage: /unpin <message_id>"))
+                        else:
+                            pin_mid = cmd_args[0].strip()
+                            await client.pin_message(pin_mid, is_pinned=False)
+                            print(green(f"✓ Unpinned message: {pin_mid[:8]}"))
+
+                    # --- Presence & Notifications ---
+                    elif cmd == "/away":
+                        await client.set_presence("AWAY")
+                        current_status = "AWAY"
+                        print(yellow("✓ Presence set to AWAY"))
+                    elif cmd == "/busy":
+                        await client.set_presence("BUSY")
+                        current_status = "BUSY"
+                        print(red("✓ Presence set to BUSY"))
+                    elif cmd == "/online":
+                        if cmd_args and cmd_args[0].lower() in ("set", "on"):
+                            await client.set_presence("ONLINE")
+                            current_status = "ONLINE"
+                            print(green("✓ Presence set to ONLINE"))
+                        else:
+                            # Also list online peers
+                            await client.set_presence("ONLINE")
+                            current_status = "ONLINE"
+                            peers = await client.list_peers()
+                            render_peers_table(peers)
+                    elif cmd == "/mute":
+                        target_r = cmd_args[0].strip().lower() if cmd_args else client.current_room.lower()
+                        muted_rooms.add(target_r)
+                        print(gray(f"✓ Notifications muted for [{target_r.upper()}]"))
+                    elif cmd == "/unmute":
+                        target_r = cmd_args[0].strip().lower() if cmd_args else client.current_room.lower()
+                        muted_rooms.discard(target_r)
+                        print(green(f"✓ Notifications unmuted for [{target_r.upper()}]"))
+                    elif cmd == "/notify":
+                        if cmd_args and cmd_args[0].lower() == "off":
+                            notifications_enabled = False
+                            print(gray("✓ Notifications disabled."))
+                        else:
+                            notifications_enabled = True
+                            print(green("✓ Notifications enabled."))
+
+                    # --- File Transfer ---
+                    elif cmd == "/send":
+                        if not cmd_args:
+                            print(red("Usage: /send <file_path>"))
+                        else:
+                            fp = Path(" ".join(cmd_args).strip())
+                            if not fp.exists() or not fp.is_file():
+                                print(red(f"File not found: {fp}"))
+                                continue
+                            if fp.stat().st_size > MAX_FILE_SIZE_BYTES:
+                                print(red("File exceeds maximum allowed size (100 MB)."))
+                                continue
+
+                            print(f"\nSend file: {cyan(fp.name)} ({round(fp.stat().st_size / (1024*1024), 2)} MB)")
+                            print("1. Direct Message to Peer")
+                            print("2. Send to Current Room")
+                            dst_choice = await input_manager.get_line("Select (1/2): ")
+
+                            target_type = "dm" if dst_choice.strip() == "1" else "group"
+                            if target_type == "dm":
+                                target_u = await input_manager.get_line("Enter recipient username: ")
+                                target_dest = target_u.strip()
+                            else:
+                                target_dest = client.current_room
+
+                            file_id = f"f_{int(time.time())}_{fp.name[:8]}"
+                            sha = calculate_sha256(fp)
+                            offer_msg = NetMashMessage(
+                                type=MessageType.FILE_OFFER,
+                                payload={
+                                    "file_id": file_id,
+                                    "name": fp.name,
+                                    "size": fp.stat().st_size,
+                                    "sha256": sha,
+                                    "target": target_dest,
+                                    "target_type": target_type,
+                                },
+                            )
+                            await client.send_message(offer_msg)
+                            print(cyan("Sending file chunks..."))
+
+                            # Send chunks
+                            for idx, total_c, b64_d in read_file_chunks(fp):
+                                chk_msg = NetMashMessage(
+                                    type=MessageType.FILE_CHUNK,
+                                    payload={
+                                        "file_id": file_id,
+                                        "chunk_index": idx,
+                                        "total_chunks": total_c,
+                                        "data": b64_d,
+                                        "target": target_dest,
+                                        "target_type": target_type,
+                                    },
+                                )
+                                await client.send_message(chk_msg)
+
+                            cmp_msg = NetMashMessage(
+                                type=MessageType.FILE_COMPLETE,
+                                payload={
+                                    "file_id": file_id,
+                                    "target": target_dest,
+                                    "target_type": target_type,
+                                },
+                            )
+                            await client.send_message(cmp_msg)
+                            print(green(f"✓ File '{fp.name}' transmitted successfully."))
+
+                    elif cmd == "/accept":
+                        if not cmd_args:
+                            print(red("Usage: /accept <file_id>"))
+                        else:
+                            target_fid = cmd_args[0].strip()
+                            # Match prefix
+                            matched = None
+                            for fid in incoming_transfers:
+                                if fid.startswith(target_fid):
+                                    matched = fid
+                                    break
+                            if matched:
+                                incoming_transfers[matched]["status"] = "accepted"
+                                print(green(f"✓ Accepted file transfer {matched[:8]}. Downloading..."))
+                            else:
+                                print(red("No matching incoming transfer found."))
+
+                    elif cmd == "/reject":
+                        if not cmd_args:
+                            print(red("Usage: /reject <file_id>"))
+                        else:
+                            target_fid = cmd_args[0].strip()
+                            matched = None
+                            for fid in incoming_transfers:
+                                if fid.startswith(target_fid):
+                                    matched = fid
+                                    break
+                            if matched:
+                                del incoming_transfers[matched]
+                                print(yellow(f"File transfer {matched[:8]} rejected."))
+                            else:
+                                print(red("No matching incoming transfer found."))
+
+                    # --- Network & Diagnostics ---
+                    elif cmd == "/diagnose":
+                        print(cyan("Running NetMash diagnostic checks..."))
+                        diag_res = await run_diagnostics(client=client)
+                        render_diagnostics(diag_res)
+                    elif cmd == "/version":
+                        print(bold("\nNetMash\n"))
+                        print(f"{'Version':<12}: {green(__version__)}")
+                        print(f"{'Python':<12}: {sys.version.split(' ')[0]}")
+                        print(f"{'Platform':<12}: {sys.platform}\n")
+                    elif cmd == "/netinfo":
+                        local_ip = get_local_ip()
+                        peers = await client.list_peers()
+                        netinfo_data = {
+                            "interface": "Wi-Fi / Ethernet",
+                            "address": local_ip,
+                            "subnet": "/24",
+                            "transport": "TCP Wire Protocol",
+                            "port": client.port,
+                            "discovery_port": DEFAULT_DISCOVERY_PORT,
+                            "host": client.server_info.get("host_name", "Local"),
+                            "peers": len(peers),
+                        }
+                        render_netinfo(netinfo_data)
+                    elif cmd == "/stats":
+                        st = await client.get_stats()
+                        if st:
+                            render_stats(st)
+                        else:
+                            print(red("Could not retrieve statistics from host."))
+                    elif cmd == "/network-name":
+                        if not cmd_args:
+                            print(red("Usage: /network-name <new_name>"))
+                        else:
+                            net_name = " ".join(cmd_args).strip()
+                            await client.set_network_name(net_name)
+                            print(green(f"✓ Network name set to: {net_name}"))
+                    elif cmd == "/reconnect":
+                        print(yellow("\nDisconnecting current session..."))
+                        saved_room = client.current_room
+                        await client.disconnect()
+                        print("Searching for NetMash host on local network...")
+                        h_info = await discover_host(timeout=2.0)
+                        if h_info:
+                            h_ip = h_info.get("host_ip", "127.0.0.1")
+                            h_port = int(h_info.get("port", DEFAULT_HOST_PORT))
+                            client.host = h_ip
+                            client.port = h_port
+                            conn = await client.connect()
+                            if conn:
+                                print(green(f"✓ Reconnected to host: {h_info.get('hostname')}"))
+                                await client.switch_room(saved_room)
+                                continue
+                        print(yellow("No NetMash host found on LAN."))
+                        start_new = await input_manager.get_line("Start a new host? [Y/n]: ")
+                        if start_new.strip().lower() not in ("n", "no"):
+                            if not server:
+                                server = NetMashServer(
+                                    port=DEFAULT_HOST_PORT,
+                                    discovery_port=DEFAULT_DISCOVERY_PORT,
+                                    identity=client.identity,
+                                )
+                                await server.start()
+                            client.host = "127.0.0.1"
+                            client.port = DEFAULT_HOST_PORT
+                            await client.connect()
+                            print(green("✓ Local host started and connected."))
                     elif cmd == "/info":
                         info = await client.get_info()
                         if info:
@@ -535,6 +1675,71 @@ async def run_interactive_chat(
                         print_divider(f"NetMash | {client.current_room.upper()} | Host: {host_name}")
                     else:
                         print(yellow("Unknown command. Use /help to see available commands."))
+                elif is_admin_mode and text.lower() in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "menu"):
+                    opt = text.lower()
+                    if opt == "1":
+                        st = await client.admin_get_status()
+                        if st:
+                            render_admin_status(st)
+                        else:
+                            print(red("Could not retrieve server status."))
+                    elif opt == "2":
+                        us = await client.admin_get_users()
+                        render_admin_users(us)
+                    elif opt == "3":
+                        gps = await client.admin_get_groups()
+                        render_admin_groups(gps)
+                    elif opt == "4":
+                        sess = await client.admin_get_sessions()
+                        render_admin_sessions(sess)
+                    elif opt == "5":
+                        print(bold("\nAdmin Moderation Controls:"))
+                        print(f"  {cyan('/admin kick <username>')}")
+                        print(f"  {cyan('/admin ban <username>')}")
+                        print(f"  {cyan('/admin unban <username>')}\n")
+                    elif opt == "6":
+                        mstats = await client.admin_get_message_stats()
+                        print(bold("\nMessage Administration & Statistics"))
+                        print(gray("───────────────────────────────────"))
+                        print(f"{'Total Messages':<22}: {mstats.get('total_messages', 0)}")
+                        print(f"{'Direct Messages':<22}: {mstats.get('total_dms', 0)}")
+                        print(f"{'File Transfers':<22}: {mstats.get('total_files', 0)}")
+                        print()
+                    elif opt == "7":
+                        diag = await client.admin_get_diagnostics()
+                        if diag:
+                            render_admin_diagnostics(diag)
+                        else:
+                            print(red("Could not retrieve diagnostics."))
+                    elif opt == "8":
+                        lgs = await client.admin_get_logs()
+                        render_admin_logs(lgs)
+                    elif opt == "9":
+                        ast = await client.admin_get_stats()
+                        if ast:
+                            render_admin_stats(ast)
+                        else:
+                            print(red("Could not retrieve statistics."))
+                    elif opt == "10":
+                        cfg = await client.admin_get_config()
+                        if cfg:
+                            render_admin_config(cfg)
+                        else:
+                            print(red("Could not retrieve configuration."))
+                    elif opt == "11":
+                        print(yellow("\nShutdown Server"))
+                        confirm = await input_manager.get_line("Are you sure? [y/N]: ")
+                        if confirm.strip().lower() in ("y", "yes"):
+                            print(red("Initiating server shutdown..."))
+                            await client.admin_shutdown_server("Admin requested shutdown")
+                        else:
+                            print(dim("Shutdown cancelled."))
+                    elif opt == "12":
+                        await client.admin_logout()
+                        is_admin_mode = False
+                        print(green("Admin session ended. Logged out."))
+                    elif opt == "menu":
+                        render_admin_menu()
                 else:
                     # Regular chat message sent strictly to current_room
                     await client.send_chat(text, room=client.current_room)
@@ -547,4 +1752,3 @@ async def run_interactive_chat(
                 continue
     finally:
         _save_readline_history(history_file)
-
