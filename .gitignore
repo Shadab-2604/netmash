@@ -41,3 +41,6 @@ htmlcov/
 .vscode/
 *.swp
 *.swo
+
+# PDFs and documentation exports
+pdfs/
