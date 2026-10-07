@@ -174,16 +174,33 @@ def apply_update() -> Tuple[bool, str]:
         # 2. Update via pip from GitHub
         try:
             pip_url = f"git+https://github.com/{GITHUB_REPO}.git"
+            pip_base_cmd = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--force-reinstall",
+                "--no-cache-dir",
+                pip_url,
+            ]
+            # Try with --break-system-packages first (for Debian/Ubuntu/WSL PEP 668 environments)
+            try:
+                pip_res = subprocess.run(
+                    pip_base_cmd + ["--break-system-packages"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=90.0,
+                )
+                if pip_res.returncode == 0:
+                    return True, "Successfully updated NetMash from GitHub repository via pip!"
+            except Exception:
+                pass
+
+            # Fallback without --break-system-packages
             pip_res = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--upgrade",
-                    "--no-cache-dir",
-                    pip_url,
-                ],
+                pip_base_cmd,
                 capture_output=True,
                 text=True,
                 check=False,

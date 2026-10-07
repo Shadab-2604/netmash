@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netmash"
-version = "1.0.0"
+version = "1.1.0"
 description = "NetMash — Local-network peer communication and discovery platform"
 readme = "README.md"
 requires-python = ">=3.10"
