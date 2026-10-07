@@ -10,6 +10,7 @@ import datetime
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from netmash.client.client import NetMashClient
 from netmash.config import get_app_dir
