@@ -9,9 +9,10 @@ import asyncio
 import datetime
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from netmash.client.client import NetMashClient
+from netmash.config import get_app_dir
 from netmash.protocol.messages import NetMashMessage
 from netmash.ui.colors import (
     bold,
@@ -26,6 +27,68 @@ from netmash.ui.colors import (
 )
 from netmash.updater import apply_update_async, check_for_updates_async
 from netmash.utils.security import sanitize_terminal_text
+
+SLASH_COMMANDS = [
+    "/help",
+    "/users",
+    "/peers",
+    "/groups",
+    "/create",
+    "/create-pin",
+    "/join",
+    "/switch",
+    "/general",
+    "/leave",
+    "/setpin",
+    "/removepin",
+    "/dm",
+    "/room",
+    "/name",
+    "/update",
+    "/check-update",
+    "/restart",
+    "/info",
+    "/status",
+    "/clear",
+    "/exit",
+    "/quit",
+]
+
+
+def _setup_readline(history_file: Optional[Path] = None) -> None:
+    """Configures readline for arrow key navigation, message history, and tab completion."""
+    try:
+        import readline
+
+        def completer(text: str, state: int) -> Optional[str]:
+            options = [c for c in SLASH_COMMANDS if c.startswith(text)]
+            if state < len(options):
+                return options[state]
+            return None
+
+        readline.set_completer(completer)
+        readline.parse_and_bind("tab: complete")
+        readline.set_history_length(1000)
+
+        if history_file and history_file.exists():
+            try:
+                readline.read_history_file(str(history_file))
+            except Exception:
+                pass
+    except (ImportError, AttributeError):
+        pass
+
+
+def _save_readline_history(history_file: Optional[Path] = None) -> None:
+    """Saves readline input history to disk."""
+    if not history_file:
+        return
+    try:
+        import readline
+
+        readline.write_history_file(str(history_file))
+    except (ImportError, AttributeError, Exception):
+        pass
 
 
 def print_banner() -> None:
@@ -148,6 +211,7 @@ def print_help() -> None:
     print(f"  {cyan('/name <new_name>')}         Change your display name")
     print(f"  {cyan('/update')}                  Check and install latest update from GitHub")
     print(f"  {cyan('/check-update')}            Check for updates without installing")
+    print(f"  {cyan('/restart')}                 Restart NetMash session")
     print(f"  {cyan('/info')}                    Show local node and network info")
     print(f"  {cyan('/status')}                  Show server status")
     print(f"  {cyan('/clear')}                   Clear terminal screen")
@@ -160,7 +224,9 @@ def clear_screen() -> None:
     os.system("cls" if sys.platform == "win32" else "clear")
 
 
-async def run_interactive_chat(client: NetMashClient) -> None:
+async def run_interactive_chat(
+    client: NetMashClient, server: Optional[Any] = None
+) -> None:
     """
     Main interactive terminal chat loop.
     Asynchronously prints incoming messages while accepting user input.
@@ -172,6 +238,9 @@ async def run_interactive_chat(client: NetMashClient) -> None:
     print_divider(f"NetMash | {client.current_room.upper()} | Host: {host_name}")
     print(dim(f"You are: {client.identity.username} ({client.identity.hostname})"))
     print(dim("Type a message to chat, or /help for available commands.\n"))
+
+    history_file = get_app_dir() / "history.txt"
+    _setup_readline(history_file)
 
     # Set up client event callbacks for formatted message display
     def on_chat(msg: NetMashMessage) -> None:
@@ -243,232 +312,238 @@ async def run_interactive_chat(client: NetMashClient) -> None:
     loop = asyncio.get_running_loop()
 
     # Input loop
-    while client.connected:
-        try:
-            # Asynchronously wait for user input without blocking the asyncio event loop
-            sys.stdout.write(f"{cyan('netmash')}> ")
-            sys.stdout.flush()
+    try:
+        while client.connected:
+            try:
+                user_input = await asyncio.to_thread(input, f"{cyan('netmash')}> ")
+                text = user_input.strip()
+                if not text:
+                    continue
 
-            user_input = await asyncio.to_thread(sys.stdin.readline)
-            if not user_input:
-                break  # EOF / stdin closed
+                if text.startswith("/"):
+                    # Handle slash commands
+                    raw_parts = text.split(" ")
+                    cmd = raw_parts[0].lower()
+                    cmd_args = [p for p in raw_parts[1:] if p]
 
-            text = user_input.strip()
-            if not text:
-                continue
-
-            if text.startswith("/"):
-                # Handle slash commands
-                raw_parts = text.split(" ")
-                cmd = raw_parts[0].lower()
-                cmd_args = [p for p in raw_parts[1:] if p]
-
-                if cmd in ("/exit", "/quit"):
-                    print(yellow("\nDisconnecting from NetMash..."))
-                    break
-                elif cmd == "/help":
-                    print_help()
-                elif cmd in ("/users", "/peers"):
-                    peers = await client.list_peers()
-                    render_peers_table(peers)
-                elif cmd == "/groups":
-                    groups = await client.list_groups()
-                    render_groups_table(groups, current_room=client.current_room)
-                elif cmd in ("/create", "/creategroup"):
-                    if not cmd_args:
-                        print(red("Usage: /create <group_name> [4-digit-pin]"))
-                    else:
-                        group_name = cmd_args[0].strip()
-                        pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
-                        if pin is None:
-                            print(f"Creating group: {cyan(group_name)}")
-                            print("1. Public")
-                            print("2. PIN protected")
-                            choice = await asyncio.to_thread(input, "Select (1/2): ")
-                            if choice.strip() == "2":
-                                pin1 = await asyncio.to_thread(input, "Enter 4-digit PIN: ")
-                                pin2 = await asyncio.to_thread(input, "Confirm PIN: ")
-                                if pin1 != pin2:
-                                    print(red("PINs do not match. Cancelled."))
-                                    continue
-                                pin = pin1.strip()
-
-                        resp = await client.create_group(group_name, pin=pin)
-                        if resp and resp.get("success"):
-                            print(green(f"✓ Group '{resp.get('name')}' created successfully (Access: {resp.get('access')})."))
-                            client.current_room = resp.get("name", group_name)
-                            print(bright_cyan(f"Active room switched to: {client.current_room.upper()}"))
-                        elif resp:
-                            print(yellow(f"{resp.get('message')}"))
+                    if cmd in ("/exit", "/quit"):
+                        print(yellow("\nDisconnecting from NetMash..."))
+                        break
+                    elif cmd == "/help":
+                        print_help()
+                    elif cmd in ("/users", "/peers"):
+                        peers = await client.list_peers()
+                        render_peers_table(peers)
+                    elif cmd == "/groups":
+                        groups = await client.list_groups()
+                        render_groups_table(groups, current_room=client.current_room)
+                    elif cmd in ("/create", "/creategroup"):
+                        if not cmd_args:
+                            print(red("Usage: /create <group_name> [4-digit-pin]"))
                         else:
-                            print(red("Failed to create group."))
-                elif cmd in ("/create-pin", "/createpin"):
-                    if len(cmd_args) < 2:
-                        print(red("Usage: /create-pin <group_name> <4-digit-pin>"))
-                    else:
-                        group_name = cmd_args[0].strip()
-                        pin = cmd_args[1].strip()
-                        resp = await client.create_group(group_name, pin=pin)
-                        if resp and resp.get("success"):
-                            print(green(f"✓ PIN group '{resp.get('name')}' created successfully."))
-                            client.current_room = resp.get("name", group_name)
-                            print(bright_cyan(f"Active room switched to: {client.current_room.upper()}"))
-                        elif resp:
-                            print(yellow(f"{resp.get('message')}"))
-                        else:
-                            print(red("Failed to create PIN group."))
-                elif cmd in ("/join", "/switch"):
-                    if not cmd_args:
-                        print(red("Usage: /join <group_name> [4-digit-pin] or /switch <group_name>"))
-                    else:
-                        target_group = cmd_args[0].strip()
-                        pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+                            group_name = cmd_args[0].strip()
+                            pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+                            if pin is None:
+                                print(f"Creating group: {cyan(group_name)}")
+                                print("1. Public")
+                                print("2. PIN protected")
+                                choice = await asyncio.to_thread(input, "Select (1/2): ")
+                                if choice.strip() == "2":
+                                    pin1 = await asyncio.to_thread(input, "Enter 4-digit PIN: ")
+                                    pin2 = await asyncio.to_thread(input, "Confirm PIN: ")
+                                    if pin1 != pin2:
+                                        print(red("PINs do not match. Cancelled."))
+                                        continue
+                                    pin = pin1.strip()
 
-                        # If switching to general
-                        if target_group.lower() == "general":
-                            resp = await client.switch_room("general")
+                            resp = await client.create_group(group_name, pin=pin)
                             if resp and resp.get("success"):
-                                print(green("✓ Switched to GENERAL room."))
+                                print(green(f"✓ Group '{resp.get('name')}' created successfully (Access: {resp.get('access')})."))
+                                client.current_room = resp.get("name", group_name)
+                                print(bright_cyan(f"Active room switched to: {client.current_room.upper()}"))
+                            elif resp:
+                                print(yellow(f"{resp.get('message')}"))
+                            else:
+                                print(red("Failed to create group."))
+                    elif cmd in ("/create-pin", "/createpin"):
+                        if len(cmd_args) < 2:
+                            print(red("Usage: /create-pin <group_name> <4-digit-pin>"))
+                        else:
+                            group_name = cmd_args[0].strip()
+                            pin = cmd_args[1].strip()
+                            resp = await client.create_group(group_name, pin=pin)
+                            if resp and resp.get("success"):
+                                print(green(f"✓ PIN group '{resp.get('name')}' created successfully."))
+                                client.current_room = resp.get("name", group_name)
+                                print(bright_cyan(f"Active room switched to: {client.current_room.upper()}"))
+                            elif resp:
+                                print(yellow(f"{resp.get('message')}"))
+                            else:
+                                print(red("Failed to create PIN group."))
+                    elif cmd in ("/join", "/switch"):
+                        if not cmd_args:
+                            print(red("Usage: /join <group_name> [4-digit-pin] or /switch <group_name>"))
+                        else:
+                            target_group = cmd_args[0].strip()
+                            pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+
+                            # If switching to general
+                            if target_group.lower() == "general":
+                                resp = await client.switch_room("general")
+                                if resp and resp.get("success"):
+                                    print(green("✓ Switched to GENERAL room."))
+                                continue
+
+                            # Try room switch first (in case already a member)
+                            switch_resp = await client.switch_room(target_group)
+                            if switch_resp and switch_resp.get("success"):
+                                print(green(f"✓ Switched to room '{target_group}'. Current room: {client.current_room.upper()}"))
+                                continue
+
+                            # Otherwise try join
+                            resp = await client.join_group(target_group, pin=pin)
+                            if resp and resp.get("requires_pin") and pin is None:
+                                pin_input = await asyncio.to_thread(
+                                    input, f"Group '{target_group}' requires a PIN. Enter 4-digit PIN: "
+                                )
+                                resp = await client.join_group(target_group, pin=pin_input.strip())
+
+                            if resp and resp.get("success"):
+                                print(green(f"✓ Joined '{target_group}'. Current room: {client.current_room.upper()}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                            else:
+                                print(red(f"✗ Could not join group '{target_group}'."))
+                    elif cmd == "/general":
+                        resp = await client.switch_room("general")
+                        if resp and resp.get("success"):
+                            print(green("✓ Returned to GENERAL room."))
+                        else:
+                            print(red("Could not switch to GENERAL."))
+                    elif cmd == "/setpin":
+                        if not cmd_args:
+                            print(red("Usage: /setpin <group_name> [new-4-digit-pin]"))
+                        else:
+                            group_name = cmd_args[0].strip()
+                            new_pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
+                            if new_pin is None:
+                                new_pin = await asyncio.to_thread(input, f"Enter new 4-digit PIN for '{group_name}': ")
+                            resp = await client.set_group_pin(group_name, pin=new_pin.strip())
+                            if resp and resp.get("success"):
+                                print(green(f"✓ {resp.get('message')}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                            else:
+                                print(red("Failed to set group PIN."))
+                    elif cmd == "/removepin":
+                        if not cmd_args:
+                            print(red("Usage: /removepin <group_name>"))
+                        else:
+                            group_name = cmd_args[0].strip()
+                            resp = await client.set_group_pin(group_name, pin=None)
+                            if resp and resp.get("success"):
+                                print(green(f"✓ {resp.get('message')}"))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                            else:
+                                print(red("Failed to remove group PIN."))
+                    elif cmd == "/leave":
+                        target_group = cmd_args[0].strip() if cmd_args else client.current_room
+                        if target_group.lower() == "general":
+                            print(yellow("You are already in GENERAL."))
+                        else:
+                            resp = await client.leave_group(target_group)
+                            if resp and resp.get("success"):
+                                print(green(f"✓ Left '{target_group}'. Returned to GENERAL."))
+                            elif resp:
+                                print(red(f"✗ {resp.get('message')}"))
+                    elif cmd == "/dm":
+                        if not cmd_args:
+                            print(red("Usage: /dm <username> [message]"))
+                        else:
+                            target_user = cmd_args[0].strip()
+                            if len(cmd_args) > 1:
+                                dm_content = " ".join(cmd_args[1:]).strip()
+                                await client.send_dm(target_user, dm_content)
+                            else:
+                                dm_content = await asyncio.to_thread(
+                                    input, f"Enter message for {target_user}: "
+                                )
+                                if dm_content.strip():
+                                    await client.send_dm(target_user, dm_content.strip())
+                    elif cmd == "/room":
+                        print(f"Current active room: {bright_cyan(client.current_room.upper())}")
+                    elif cmd == "/name":
+                        if not cmd_args:
+                            print(red("Usage: /name <new_name>"))
+                        else:
+                            new_name = cmd_args[0].strip()
+                            await client.change_name(new_name)
+                            print(green(f"✓ Name change requested: {new_name}"))
+                    elif cmd == "/info":
+                        info = await client.get_info()
+                        if info:
+                            render_info(info)
+                    elif cmd == "/status":
+                        status = await client.get_status()
+                        if status:
+                            render_status(status)
+                    elif cmd in ("/update-check", "/check-update", "/checkupdate"):
+                        print(cyan("Checking GitHub for the latest NetMash updates..."))
+                        up_info = await check_for_updates_async()
+                        if up_info.get("error"):
+                            print(red(f"Error checking for updates: {up_info['error']}"))
+                        else:
+                            cur = up_info.get("current_commit") or "installed"
+                            latest = up_info.get("latest_commit") or "latest"
+                            msg = up_info.get("commit_message") or ""
+                            print(f"Current commit:  {cyan(cur)}")
+                            print(f"Latest on GitHub: {green(latest)} ({msg})")
+                            if up_info.get("update_available"):
+                                print(yellow("\n💡 A new update is available! Type /update to apply now."))
+                            else:
+                                print(green("\n✓ NetMash is already up to date!"))
+                    elif cmd == "/update":
+                        print(cyan("Checking GitHub for updates..."))
+                        up_info = await check_for_updates_async()
+                        if not up_info.get("error") and not up_info.get("update_available"):
+                            cur = up_info.get("current_commit") or "installed"
+                            print(green(f"✓ NetMash is already up to date! (Commit: {cur})"))
                             continue
 
-                        # Try room switch first (in case already a member)
-                        switch_resp = await client.switch_room(target_group)
-                        if switch_resp and switch_resp.get("success"):
-                            print(green(f"✓ Switched to room '{target_group}'. Current room: {client.current_room.upper()}"))
-                            continue
-
-                        # Otherwise try join
-                        resp = await client.join_group(target_group, pin=pin)
-                        if resp and resp.get("requires_pin") and pin is None:
-                            pin_input = await asyncio.to_thread(
-                                input, f"Group '{target_group}' requires a PIN. Enter 4-digit PIN: "
-                            )
-                            resp = await client.join_group(target_group, pin=pin_input.strip())
-
-                        if resp and resp.get("success"):
-                            print(green(f"✓ Joined '{target_group}'. Current room: {client.current_room.upper()}"))
-                        elif resp:
-                            print(red(f"✗ {resp.get('message')}"))
+                        print(cyan("Downloading and applying update from GitHub..."))
+                        success, update_msg = await apply_update_async()
+                        if success:
+                            print(green(f"✓ {update_msg}"))
+                            print(yellow("Please type /restart to apply the updated version."))
                         else:
-                            print(red(f"✗ Could not join group '{target_group}'."))
-                elif cmd == "/general":
-                    resp = await client.switch_room("general")
-                    if resp and resp.get("success"):
-                        print(green("✓ Returned to GENERAL room."))
+                            print(red(f"✗ Update failed:\n{update_msg}"))
+                    elif cmd in ("/restart", "/reload"):
+                        print(cyan("\nRestarting NetMash session..."))
+                        try:
+                            await client.disconnect()
+                            if server:
+                                await server.stop()
+                        except Exception:
+                            pass
+                        _save_readline_history(history_file)
+                        os.execv(sys.executable, [sys.executable] + sys.argv)
+                    elif cmd == "/clear":
+                        clear_screen()
+                        print_banner()
+                        print_divider(f"NetMash | {client.current_room.upper()} | Host: {host_name}")
                     else:
-                        print(red("Could not switch to GENERAL."))
-                elif cmd == "/setpin":
-                    if not cmd_args:
-                        print(red("Usage: /setpin <group_name> [new-4-digit-pin]"))
-                    else:
-                        group_name = cmd_args[0].strip()
-                        new_pin = cmd_args[1].strip() if len(cmd_args) > 1 else None
-                        if new_pin is None:
-                            new_pin = await asyncio.to_thread(input, f"Enter new 4-digit PIN for '{group_name}': ")
-                        resp = await client.set_group_pin(group_name, pin=new_pin.strip())
-                        if resp and resp.get("success"):
-                            print(green(f"✓ {resp.get('message')}"))
-                        elif resp:
-                            print(red(f"✗ {resp.get('message')}"))
-                        else:
-                            print(red("Failed to set group PIN."))
-                elif cmd == "/removepin":
-                    if not cmd_args:
-                        print(red("Usage: /removepin <group_name>"))
-                    else:
-                        group_name = cmd_args[0].strip()
-                        resp = await client.set_group_pin(group_name, pin=None)
-                        if resp and resp.get("success"):
-                            print(green(f"✓ {resp.get('message')}"))
-                        elif resp:
-                            print(red(f"✗ {resp.get('message')}"))
-                        else:
-                            print(red("Failed to remove group PIN."))
-                elif cmd == "/leave":
-                    target_group = cmd_args[0].strip() if cmd_args else client.current_room
-                    if target_group.lower() == "general":
-                        print(yellow("You are already in GENERAL."))
-                    else:
-                        resp = await client.leave_group(target_group)
-                        if resp and resp.get("success"):
-                            print(green(f"✓ Left '{target_group}'. Returned to GENERAL."))
-                        elif resp:
-                            print(red(f"✗ {resp.get('message')}"))
-                elif cmd == "/dm":
-                    if not cmd_args:
-                        print(red("Usage: /dm <username> [message]"))
-                    else:
-                        target_user = cmd_args[0].strip()
-                        if len(cmd_args) > 1:
-                            dm_content = " ".join(cmd_args[1:]).strip()
-                            await client.send_dm(target_user, dm_content)
-                        else:
-                            dm_content = await asyncio.to_thread(
-                                input, f"Enter message for {target_user}: "
-                            )
-                            if dm_content.strip():
-                                await client.send_dm(target_user, dm_content.strip())
-                elif cmd == "/room":
-                    print(f"Current active room: {bright_cyan(client.current_room.upper())}")
-                elif cmd == "/name":
-                    if not cmd_args:
-                        print(red("Usage: /name <new_name>"))
-                    else:
-                        new_name = cmd_args[0].strip()
-                        await client.change_name(new_name)
-                        print(green(f"✓ Name change requested: {new_name}"))
-                elif cmd == "/info":
-                    info = await client.get_info()
-                    if info:
-                        render_info(info)
-                elif cmd == "/status":
-                    status = await client.get_status()
-                    if status:
-                        render_status(status)
-                elif cmd in ("/update-check", "/check-update", "/checkupdate"):
-                    print(cyan("Checking GitHub for the latest NetMash updates..."))
-                    up_info = await check_for_updates_async()
-                    if up_info.get("error"):
-                        print(red(f"Error checking for updates: {up_info['error']}"))
-                    else:
-                        cur = up_info.get("current_commit") or "installed"
-                        latest = up_info.get("latest_commit") or "latest"
-                        msg = up_info.get("commit_message") or ""
-                        print(f"Current commit:  {cyan(cur)}")
-                        print(f"Latest on GitHub: {green(latest)} ({msg})")
-                        if up_info.get("update_available"):
-                            print(yellow("\n💡 A new update is available! Type /update to apply now."))
-                        else:
-                            print(green("\n✓ NetMash is already up to date!"))
-                elif cmd == "/update":
-                    print(cyan("Checking GitHub for updates..."))
-                    up_info = await check_for_updates_async()
-                    if not up_info.get("error") and not up_info.get("update_available"):
-                        cur = up_info.get("current_commit") or "installed"
-                        print(green(f"✓ NetMash is already up to date! (Commit: {cur})"))
-                        continue
-
-                    print(cyan("Downloading and applying update from GitHub..."))
-                    success, update_msg = await apply_update_async()
-                    if success:
-                        print(green(f"✓ {update_msg}"))
-                        print(yellow("Please restart NetMash to apply the updated version."))
-                    else:
-                        print(red(f"✗ Update failed:\n{update_msg}"))
-                elif cmd == "/clear":
-                    clear_screen()
-                    print_banner()
-                    print_divider(f"NetMash | {client.current_room.upper()} | Host: {host_name}")
+                        print(yellow("Unknown command. Use /help to see available commands."))
                 else:
-                    print(yellow("Unknown command. Use /help to see available commands."))
-            else:
-                # Regular chat message sent strictly to current_room
-                await client.send_chat(text, room=client.current_room)
+                    # Regular chat message sent strictly to current_room
+                    await client.send_chat(text, room=client.current_room)
 
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            print(yellow("\nDisconnecting from NetMash..."))
-            break
-        except Exception as e:
-            print(red(f"\nUnexpected input error: {e}"))
-            break
+            except (EOFError, KeyboardInterrupt, asyncio.CancelledError):
+                print(yellow("\nDisconnecting from NetMash..."))
+                break
+            except Exception as e:
+                print(red(f"\nUnexpected input error: {e}"))
+                break
+    finally:
+        _save_readline_history(history_file)
 

@@ -284,6 +284,7 @@ netmash group info developers
 /name <new_name>         Change your display name
 /update                  Check and install latest update from GitHub
 /check-update            Check for updates without installing
+/restart                 Restart NetMash session
 /info                    Display network and node info
 /status                  Display server uptime and metrics
 /clear                   Clear terminal screen

@@ -527,7 +527,7 @@ async def run_netmash_main(args: argparse.Namespace) -> None:
 
     # 4. Start interactive terminal chat
     try:
-        await run_interactive_chat(client)
+        await run_interactive_chat(client, server=server)
     finally:
         print(yellow("\nShutting down NetMash..."))
         await client.disconnect()
