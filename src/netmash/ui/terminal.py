@@ -1185,7 +1185,8 @@ async def run_interactive_chat(
                                 entered_pass = await input_manager.get_line("Password: ", is_password=True)
                                 auth_res = await client.admin_auth(entered_pass.strip())
                                 if auth_res.get("locked"):
-                                    print(red("\nToo many failed attempts.\nAdmin authentication temporarily locked.\nTry again later.\n"))
+                                    rem = auth_res.get("remaining", 60)
+                                    print(red(f"\nToo many failed attempts.\nAdmin authentication temporarily locked ({int(rem)}s remaining).\nTry again later.\n"))
                                 elif auth_res.get("success"):
                                     is_admin_mode = True
                                     print(green("\nAdmin authentication successful."))
@@ -1193,7 +1194,20 @@ async def run_interactive_chat(
                                 else:
                                     print(red("\nAuthentication failed.\n"))
                         else:
-                            print(yellow(f"Unknown admin subcommand: {subcmd}"))
+                            if not is_admin_mode:
+                                # Allow direct inline /admin <password> entry
+                                auth_res = await client.admin_auth(cmd_args[0].strip())
+                                if auth_res.get("locked"):
+                                    rem = auth_res.get("remaining", 60)
+                                    print(red(f"\nToo many failed attempts.\nAdmin authentication temporarily locked ({int(rem)}s remaining).\nTry again later.\n"))
+                                elif auth_res.get("success"):
+                                    is_admin_mode = True
+                                    print(green("\nAdmin authentication successful."))
+                                    render_admin_menu()
+                                else:
+                                    print(red("\nAuthentication failed.\n"))
+                            else:
+                                print(yellow(f"Unknown admin subcommand: {subcmd}"))
 
                     # --- Navigation & General ---
                     elif cmd in ("/exit", "/quit"):
