@@ -226,7 +226,6 @@ Inside an active NetMash session, the following slash commands are available:
 - `/status` — View server uptime and connection status.
 - `/stats` — View network throughput (RX/TX MB) and message counts.
 - `/reconnect` — Reconnect transport or discover a new host.
-- `/network-name <name>` — Rename LAN session network name.
 - `/version` — View NetMash, Python, and platform versions.
 - `/update` — Download and apply latest update from GitHub.
 - `/check-update` — Check for updates without installing.

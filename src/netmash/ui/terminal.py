@@ -106,7 +106,6 @@ SLASH_COMMANDS = [
     "/unban",
     "/announce",
     "/send",
-    "/network-name",
     "/update",
     "/check-update",
     "/restart",
@@ -779,7 +778,6 @@ def print_help() -> None:
     print(fmt("/stats", "Show network throughput and server metrics"))
     print(fmt("/diagnose", "Run full diagnostic suite & remediation hints"))
     print(fmt("/reconnect", "Reconnect to host or discover new host"))
-    print(fmt("/network-name <name>", "Rename LAN session network name"))
 
     print(theme.bold("\nApplication"))
     print(fmt("/name <new_name>", "Change your display name"))
@@ -1698,13 +1696,6 @@ async def run_interactive_chat(
                             render_stats(st)
                         else:
                             print(red("Could not retrieve statistics from host."))
-                    elif cmd == "/network-name":
-                        if not cmd_args:
-                            print(red("Usage: /network-name <new_name>"))
-                        else:
-                            net_name = " ".join(cmd_args).strip()
-                            await client.set_network_name(net_name)
-                            print(green(f"✓ Network name set to: {net_name}"))
                     elif cmd == "/reconnect":
                         print(yellow("\nDisconnecting current session..."))
                         saved_room = client.current_room
