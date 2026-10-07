@@ -500,15 +500,15 @@ netmash
 
 ## 14. Automated Testing Suite
 
-NetMash includes a comprehensive 65-test suite covering unit, security, admin authorization, theme registry, and two-instance live integration tests:
+NetMash includes a comprehensive 69-test suite covering unit, security, admin authorization, theme registry & dynamic redraw, and two-instance live integration tests:
 
 ```bash
 python -m pytest -v
 ```
 
 ### Test Coverage Highlights
-- **Two-Instance Integration** (`tests/integration/test_two_instances.py`): 14 tests verifying real TCP communication, discovery, chat, input persistence, PIN security, DMs, history, search, moderation, diagnostics, file transfer, admin isolation, and client-local theme isolation between two concurrent nodes.
-- **10-Theme System** (`tests/test_theme.py`): 10 tests validating the centralized theme registry, semantic styling, ID/name lookups, random selection, plain-text fallback, and persistence.
+- **Two-Instance Integration** (`tests/integration/test_two_instances.py`): 16 tests verifying real TCP communication, discovery, chat, input persistence, PIN security, DMs, history, search, moderation, diagnostics, file transfer, admin isolation, presence state updates across all nodes, and client-local theme isolation between two concurrent nodes.
+- **10-Theme System & Redraw** (`tests/test_theme.py`): 12 tests validating the centralized theme registry, semantic styling, ID/name lookups, random selection, plain-text fallback, full dynamic screen redraw, consistent help column alignment, and persistence.
 - **Admin System & Security** (`tests/test_admin.py`, `tests/test_security.py`): Scrypt password hashing, rate limiting, temporary lockout, permission barriers, controlled server shutdown, and ANSI sanitization.
 - **Terminal Input Regression** (`tests/test_terminal_input.py`): 5 tests validating buffer preservation, cursor restoration, long strings, special characters, and history.
 - **Groups, Identity & Features** (`tests/test_groups.py`, `tests/test_identity.py`, `tests/test_features.py`, `tests/test_updater.py`).

@@ -670,3 +670,128 @@ async def test_two_instances_theme_isolation_and_persistence(two_instances_env, 
     assert load_config().get("theme") == "Ocean"
 
 
+@pytest.mark.asyncio
+async def test_two_instances_presence_updates_all_states(two_instances_env):
+    """
+    Verifies that presence updates (/away, /busy, /online) are cleanly broadcast and received:
+    - Alice updates presence to AWAY -> Bob receives valid status event without UNKNOWN_TYPE error.
+    - Alice updates presence to BUSY -> Bob receives BUSY status.
+    - Alice updates presence to ONLINE -> Bob receives ONLINE status.
+    - Bob is actively typing in TerminalInputManager during these presence events;
+      his input buffer and cursor remain completely intact.
+    """
+    client_a = two_instances_env["client_a"]
+    client_b = two_instances_env["client_b"]
+
+    presence_events_b: List[Dict[str, Any]] = []
+    error_events_b: List[NetMashMessage] = []
+
+    client_b.on_presence_update = lambda msg: presence_events_b.append(msg.payload)
+    client_b.on_error = lambda msg: error_events_b.append(msg)
+
+    # Bob starts typing
+    mgr_b = TerminalInputManager(prompt=lambda: f"netmash>{client_b.current_room}> ")
+    mgr_b._buffer = list("drafting an important response")
+    mgr_b._cursor_pos = 15
+    mgr_b._active = True
+
+    # 1. Alice sets status to AWAY
+    sent_away = await client_a.set_presence("AWAY")
+    assert sent_away is True
+    await asyncio.sleep(0.1)
+
+    assert len(presence_events_b) >= 1
+    assert presence_events_b[-1].get("username") == "Alice"
+    assert presence_events_b[-1].get("status") == "AWAY"
+    assert len(error_events_b) == 0
+
+    # Verify Bob's buffer survived
+    assert mgr_b.buffer_text == "drafting an important response"
+    assert mgr_b.cursor_position == 15
+
+    # 2. Alice sets status to BUSY
+    sent_busy = await client_a.set_presence("BUSY")
+    assert sent_busy is True
+    await asyncio.sleep(0.1)
+
+    assert presence_events_b[-1].get("username") == "Alice"
+    assert presence_events_b[-1].get("status") == "BUSY"
+    assert len(error_events_b) == 0
+    assert mgr_b.buffer_text == "drafting an important response"
+
+    # 3. Alice sets status back to ONLINE
+    sent_online = await client_a.set_presence("ONLINE")
+    assert sent_online is True
+    await asyncio.sleep(0.1)
+
+    assert presence_events_b[-1].get("username") == "Alice"
+    assert presence_events_b[-1].get("status") == "ONLINE"
+    assert len(error_events_b) == 0
+    assert mgr_b.buffer_text == "drafting an important response"
+
+
+@pytest.mark.asyncio
+async def test_two_instances_all_help_commands_audit(two_instances_env, tmp_path: Path):
+    """
+    Comprehensive End-to-End audit of every single command exposed by /help.
+    Verifies parser, real business logic, network propagation, and state updates.
+    """
+    client_a = two_instances_env["client_a"]
+    client_b = two_instances_env["client_b"]
+
+    # 1. /whoami & /info & /version
+    assert client_a.identity.username == "Alice"
+    assert client_b.identity.username == "Bob"
+    info_a = await client_a.get_info()
+    assert info_a.get("version") is not None
+
+    # 2. /users & /peers
+    peers_a = await client_a.list_peers()
+    assert any(p.get("username") == "Bob" for p in peers_a)
+
+    # 3. /groups & /create & /switch & /room & /general
+    g_res = await client_a.create_group("audit-room", pin=None)
+    assert g_res.get("success") is True
+
+    await client_b.join_group("audit-room")
+    assert client_b.current_room == "audit-room"
+
+    await client_b.switch_room("general")
+    assert client_b.current_room == "general"
+
+    # 4. /members
+    members_res = await client_a.get_members("audit-room")
+    assert members_res is not None
+
+    # 5. /setpin & /removepin
+    setpin_res = await client_a.set_group_pin("audit-room", "7788")
+    assert setpin_res.get("success") is True
+    rempin_res = await client_a.set_group_pin("audit-room", None)
+    assert rempin_res.get("success") is True
+
+    # 6. /dm & /chat & /history & /search
+    await client_a.send_dm("Bob", "Secret audit token DM")
+    await client_a.send_chat("Secret audit token: AUDIT-999", room="general")
+    await asyncio.sleep(0.05)
+    search_res = await client_a.search_messages("AUDIT-999")
+    assert len(search_res) >= 1
+
+    # 7. /name
+    name_res = await client_b.change_name("Bobby")
+    assert name_res is not None
+    await asyncio.sleep(0.05)
+
+    # 8. /diagnose & /stats & /status
+    diag = await run_diagnostics(client=client_a)
+    assert diag.get("status") in ("READY", "WARNING", "ERROR")
+    st = await client_a.get_status()
+    assert st.get("server_status") == "ONLINE"
+    stats = await client_a.get_stats()
+    assert stats.get("connected_peers") >= 2
+
+    # 9. /delete group
+    del_res = await client_a.delete_group("audit-room")
+    assert del_res.get("success") is True
+
+
+

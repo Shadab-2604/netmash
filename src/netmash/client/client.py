@@ -163,7 +163,7 @@ class NetMashClient:
             self.on_peer_leave(msg)
         elif msg_type in (MessageType.NAME_CHANGE_BROADCAST, MessageType.NAME_CHANGE) and self.on_name_change:
             self.on_name_change(msg)
-        elif msg_type == MessageType.PRESENCE_BROADCAST and self.on_presence_update:
+        elif msg_type in (MessageType.PRESENCE_BROADCAST, MessageType.PRESENCE_UPDATE) and self.on_presence_update:
             self.on_presence_update(msg)
         elif msg_type == MessageType.MESSAGE_EDIT_BROADCAST and self.on_message_edit:
             self.on_message_edit(msg)

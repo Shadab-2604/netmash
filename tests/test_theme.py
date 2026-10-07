@@ -237,3 +237,44 @@ def test_render_invalid_theme_output(capsys):
     assert "Use:" in captured
     assert "/theme 1-10" in captured
     assert "/theme random" in captured
+
+
+def test_print_help_theme_alignment(capsys):
+    """Verifies that print_help runs cleanly and includes all categories and /theme command."""
+    from netmash.ui.terminal import print_help
+    set_active_theme("Cyberpunk", persist=False)
+    print_help()
+    captured = capsys.readouterr().out
+
+    assert "Interactive Commands" in captured
+    assert "General" in captured
+    assert "Groups" in captured
+    assert "Communication" in captured
+    assert "Presence & Notifications" in captured
+    assert "Network & Diagnostics" in captured
+    assert "Application" in captured
+    assert "/theme [1-10|random]" in captured
+
+
+def test_redraw_screen_renders_all_components(capsys):
+    """Verifies that redraw_screen clears terminal, renders banner, header, identity, and notice in active theme."""
+    from netmash.identity import NodeIdentity
+    from netmash.client.client import NetMashClient
+    from netmash.ui.terminal import redraw_screen
+
+    identity = NodeIdentity(node_id="node-test-123", username="TestUser", hostname="laptop-test")
+    client = NetMashClient(host="127.0.0.1", port=19000, identity=identity)
+    client.server_info = {"host_name": "LAPTOP-TEST", "network_name": "NetMash"}
+    client.current_room = "general"
+
+    set_active_theme("Ocean", persist=False)
+    redraw_screen(client=client, notice="✓ Theme set to Ocean.")
+    captured = capsys.readouterr().out
+
+    assert "NETMASH" in captured
+    assert "Connect. Discover. Chat." in captured
+    assert "GENERAL" in captured
+    assert "LAPTOP-TEST" in captured
+    assert "TestUser" in captured
+    assert "Theme set to Ocean" in captured
+

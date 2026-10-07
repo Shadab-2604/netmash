@@ -7,9 +7,10 @@ room routing, rate limiting, and discovery.
 from __future__ import annotations
 
 import asyncio
-import logging
 import datetime
+import logging
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -285,7 +286,7 @@ class NetMashServer:
                 await self._handle_status_request(session)
             elif msg_type == MessageType.STATS_REQUEST:
                 await self._handle_stats_request(session)
-            elif msg_type == MessageType.PRESENCE_UPDATE:
+            elif msg_type in (MessageType.PRESENCE_UPDATE, MessageType.PRESENCE_BROADCAST):
                 await self._handle_presence_update(session, payload)
             elif msg_type == MessageType.MEMBERS_REQUEST:
                 await self._handle_members_request(session, payload)
@@ -1030,6 +1031,29 @@ class NetMashServer:
             for s in self.sessions.values():
                 if s.node_id != session.node_id and (target_name == "general" or self.group_manager.is_member(target_name, s.node_id)):
                     await s.send_message(forward_msg)
+
+    async def _handle_info_request(self, session: ClientSession) -> None:
+        """Handles info_request and returns host and platform info."""
+        uptime = int(time.monotonic() - self.start_time)
+        hrs, rem = divmod(uptime, 3600)
+        mins, secs = divmod(rem, 60)
+        uptime_str = f"{hrs:02d}:{mins:02d}:{secs:02d}"
+
+        resp = NetMashMessage(
+            type=MessageType.INFO_RESPONSE,
+            payload={
+                "version": PROTOCOL_VERSION,
+                "hostname": self.identity.hostname,
+                "username": session.username,
+                "os": sys.platform,
+                "local_ip": "127.0.0.1",
+                "status": "ONLINE",
+                "peers": len(self.sessions),
+                "groups": len(self.group_manager.list_groups()),
+                "uptime": uptime_str,
+            },
+        )
+        await session.send_message(resp)
 
     async def _handle_status_request(self, session: ClientSession) -> None:
         uptime = int(time.monotonic() - self.start_time)

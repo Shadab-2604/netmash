@@ -151,24 +151,26 @@ def _save_readline_history(history_file: Optional[Path] = None) -> None:
 
 def print_banner() -> None:
     """Prints the NetMash welcome banner."""
+    t = get_active_theme()
     print()
-    print(cyan("╭──────────────────────────────────────────╮"))
-    print(cyan("│") + bold("                 NETMASH                  ") + cyan("│"))
-    print(cyan("│") + dim("         Connect. Discover. Chat.         ") + cyan("│"))
-    print(cyan("╰──────────────────────────────────────────╯"))
+    print(t.border("╭──────────────────────────────────────────╮"))
+    print(t.border("│") + t.header("                 NETMASH                  ") + t.border("│"))
+    print(t.border("│") + t.dim("         Connect. Discover. Chat.         ") + t.border("│"))
+    print(t.border("╰──────────────────────────────────────────╯"))
     print()
 
 
 def print_divider(label: Optional[str] = None) -> None:
     """Prints a clean horizontal terminal divider."""
+    t = get_active_theme()
     width = 54
     if label:
         sanitized_label = f" {label} "
         left_len = max(2, (width - len(sanitized_label)) // 2)
         right_len = max(2, width - len(sanitized_label) - left_len)
-        print(gray("─" * left_len) + cyan(sanitized_label) + gray("─" * right_len))
+        print(t.border("─" * left_len) + t.header(sanitized_label) + t.border("─" * right_len))
     else:
-        print(gray("─" * width))
+        print(t.border("─" * width))
 
 
 def render_whoami(
@@ -180,11 +182,12 @@ def render_whoami(
     host: str = "Host",
 ) -> None:
     """Renders formatted /whoami identity view."""
-    print(bold("\nNetMash Identity\n"))
-    print(f"{'Username':<12}: {cyan(username)}")
-    print(f"{'Node ID':<12}: {dim(node_id)}")
+    t = get_active_theme()
+    print(t.bold("\nNetMash Identity\n"))
+    print(f"{'Username':<12}: {t.primary(username)}")
+    print(f"{'Node ID':<12}: {t.dim(node_id)}")
     print(f"{'Hostname':<12}: {hostname}")
-    status_str = green(status) if status == "ONLINE" else (yellow(status) if status == "AWAY" else red(status))
+    status_str = t.success(status) if status == "ONLINE" else (t.warning(status) if status == "AWAY" else t.error(status))
     print(f"{'Status':<12}: {status_str}")
     print(f"{'Role':<12}: {role}")
     print(f"{'Host':<12}: {host}")
@@ -193,11 +196,12 @@ def render_whoami(
 
 def render_peers_table(peers: List[Dict[str, Any]]) -> None:
     """Renders formatted list of connected peers with presence and latency."""
-    print(bold("\nOnline Peers\n"))
-    print(f"{bold('USER'):<18} {bold('STATUS'):<12} {bold('LATENCY'):<10} {bold('HOSTNAME')}")
-    print(gray("─" * 54))
+    t = get_active_theme()
+    print(t.bold("\nOnline Peers\n"))
+    print(f"{t.bold('USER'):<18} {t.bold('STATUS'):<12} {t.bold('LATENCY'):<10} {t.bold('HOSTNAME')}")
+    print(t.border("─" * 54))
     if not peers:
-        print(dim("No peers online."))
+        print(t.dim("No peers online."))
         print()
         return
 
@@ -206,55 +210,56 @@ def render_peers_table(peers: List[Dict[str, Any]]) -> None:
         host = sanitize_terminal_text(p.get("hostname", ""))[:18]
         raw_status = p.get("status", "ONLINE")
         if raw_status == "ONLINE":
-            status_str = green("ONLINE")
+            status_str = t.success("ONLINE")
         elif raw_status == "AWAY":
-            status_str = yellow("AWAY")
+            status_str = t.warning("AWAY")
         elif raw_status == "BUSY":
-            status_str = red("BUSY")
+            status_str = t.error("BUSY")
         else:
-            status_str = gray("OFFLINE")
+            status_str = t.muted("OFFLINE")
 
         lat = p.get("latency_ms", 0.0)
         lat_str = f"{lat}ms" if lat > 0 else "<1ms"
-        print(f"{cyan(user):<27} {status_str:<21} {lat_str:<10} {host}")
+        print(f"{t.primary(user):<27} {status_str:<21} {lat_str:<10} {host}")
     print()
 
 
 def render_members(data: Dict[str, Any]) -> None:
     """Renders categorized group members (Owner, Moderators, Members)."""
+    t = get_active_theme()
     group_name = data.get("group", "group")
-    print(bold(f"\nMembers for: {group_name}\n"))
+    print(t.bold(f"\nMembers for: {group_name}\n"))
 
     owner = data.get("owner")
-    print(bold("Owner:"))
+    print(t.bold("Owner:"))
     if isinstance(owner, list):
         if owner:
             for o in owner:
-                print(f"  {green(o)}")
+                print(f"  {t.success(o)}")
         else:
-            print(dim("  None"))
+            print(t.dim("  None"))
     elif owner:
-        print(f"  {green(str(owner))}")
+        print(f"  {t.success(str(owner))}")
     else:
-        print(dim("  None"))
+        print(t.dim("  None"))
     print()
 
     mods = data.get("moderators", [])
-    print(bold("Moderators:"))
+    print(t.bold("Moderators:"))
     if mods:
         for m in mods:
-            print(f"  {yellow(m)}")
+            print(f"  {t.warning(m)}")
     else:
-        print(dim("  None"))
+        print(t.dim("  None"))
     print()
 
     members = data.get("members", [])
-    print(bold("Members:"))
+    print(t.bold("Members:"))
     if members:
         for mem in members:
-            print(f"  {cyan(mem)}")
+            print(f"  {t.primary(mem)}")
     else:
-        print(dim("  None"))
+        print(t.dim("  None"))
     print()
 
 
@@ -262,11 +267,12 @@ def render_groups_table(
     groups: List[Dict[str, Any]], current_room: Optional[str] = None
 ) -> None:
     """Renders formatted list of available groups. Star strictly shows for current active room."""
-    print(bold("\nAvailable Groups\n"))
-    print(f"{bold('NAME'):<20} {bold('MEMBERS'):<12} {bold('ACCESS')}")
-    print(gray("─" * 42))
+    t = get_active_theme()
+    print(t.bold("\nAvailable Groups\n"))
+    print(f"{t.bold('NAME'):<20} {t.bold('MEMBERS'):<12} {t.bold('ACCESS')}")
+    print(t.border("─" * 42))
     if not groups:
-        print(dim("No groups available."))
+        print(t.dim("No groups available."))
         print()
         return
 
@@ -275,7 +281,7 @@ def render_groups_table(
         name = sanitize_terminal_text(raw_name)[:18]
         members = str(g.get("members", 0))
         access = g.get("access", "PUBLIC")
-        access_str = yellow("PIN") if access == "PIN" else green("PUBLIC")
+        access_str = t.warning("PIN") if access == "PIN" else t.success("PUBLIC")
 
         is_inside = False
         if current_room:
@@ -283,31 +289,32 @@ def render_groups_table(
         elif g.get("is_inside") or g.get("is_active"):
             is_inside = True
 
-        mem_flag = bright_cyan(" *") if is_inside else ""
+        mem_flag = t.accent(" *") if is_inside else ""
         print(f"{name + mem_flag:<20} {members:<12} {access_str}")
     print()
 
 
 def render_diagnostics(diag: Dict[str, Any]) -> None:
     """Renders formatted system diagnostics results with remediation hints."""
-    print(bold("\nNetMash Diagnostics\n"))
+    t = get_active_theme()
+    print(t.bold("\nNetMash Diagnostics\n"))
     checks = diag.get("checks", [])
     for c in checks:
         name = c.get("name", "")
         ok = c.get("ok", False)
         detail = c.get("detail", "")
         if ok:
-            print(f"{green('✓')} {name:<26} {dim(detail)}")
+            print(f"{t.success('✓')} {name:<26} {t.dim(detail)}")
         else:
-            print(f"{red('✗')} {name:<26} {red(detail)}")
+            print(f"{t.error('✗')} {name:<26} {t.error(detail)}")
 
     status = diag.get("status", "READY")
-    status_str = green(status) if status == "READY" else yellow(status)
+    status_str = t.success(status) if status == "READY" else t.warning(status)
     print(f"\nResult: {status_str}")
 
     remediations = diag.get("remediations", [])
     if remediations:
-        print(yellow("\nRemediation hints:"))
+        print(t.warning("\nRemediation hints:"))
         for r in remediations:
             print(f"  • {r}")
     print()
@@ -315,9 +322,10 @@ def render_diagnostics(diag: Dict[str, Any]) -> None:
 
 def render_netinfo(info: Dict[str, Any]) -> None:
     """Renders local network information without arbitrary LAN scanning."""
-    print(bold("\nNetwork Information\n"))
+    t = get_active_theme()
+    print(t.bold("\nNetwork Information\n"))
     print(f"{'Interface':<14}: {info.get('interface', 'Wi-Fi / Ethernet')}")
-    print(f"{'Address':<14}: {green(str(info.get('address', '127.0.0.1')))}")
+    print(f"{'Address':<14}: {t.success(str(info.get('address', '127.0.0.1')))}")
     print(f"{'Subnet':<14}: {info.get('subnet', '/24')}")
     print(f"{'Transport':<14}: {info.get('transport', 'TCP Wire Protocol')}")
     print(f"{'Port':<14}: {info.get('port', DEFAULT_HOST_PORT)}")
@@ -329,7 +337,8 @@ def render_netinfo(info: Dict[str, Any]) -> None:
 
 def render_stats(stats: Dict[str, Any]) -> None:
     """Renders NetMash host statistics."""
-    print(bold("\nNetMash Statistics\n"))
+    t = get_active_theme()
+    print(t.bold("\nNetMash Statistics\n"))
     print(f"{'Uptime':<18}: {stats.get('uptime', '00:00:00')}")
     print(f"{'Connected Peers':<18}: {stats.get('connected_peers', 0)}")
     print(f"{'Groups':<18}: {stats.get('total_groups', 0)}")
@@ -344,9 +353,10 @@ def render_stats(stats: Dict[str, Any]) -> None:
 
 def render_history(messages: List[Dict[str, Any]]) -> None:
     """Renders recent message history in room."""
-    print(bold("\nRecent Messages\n"))
+    t = get_active_theme()
+    print(t.bold("\nRecent Messages\n"))
     if not messages:
-        print(dim("No recent messages."))
+        print(t.dim("No recent messages."))
         print()
         return
 
@@ -360,21 +370,22 @@ def render_history(messages: List[Dict[str, Any]]) -> None:
         pinned = m.get("pinned", 0)
         edited = m.get("edited", 0)
 
-        pin_tag = yellow("📌 [PINNED] ") if pinned else ""
-        edit_tag = dim(" (edited)") if edited else ""
-        id_tag = dim(f"(ID: {msg_id[:8]})")
+        pin_tag = t.warning("📌 [PINNED] ") if pinned else ""
+        edit_tag = t.dim(" (edited)") if edited else ""
+        id_tag = t.dim(f"(ID: {msg_id[:8]})")
 
-        print(f"{dim(f'[{time_part}]')} {id_tag} {cyan(sender)}: {pin_tag}")
+        print(f"{t.dim(f'[{time_part}]')} {id_tag} {t.primary(sender)}: {pin_tag}")
         if reply_to:
-            print(f"  {dim('↳ Replying to: ' + reply_to[:8])}")
-        print(f"{content}{edit_tag}\n")
+            print(f"  {t.dim('↳ Replying to: ' + reply_to[:8])}")
+        print(f"{t.message(content)}{edit_tag}\n")
 
 
 def render_search_results(query: str, results: List[Dict[str, Any]]) -> None:
     """Renders message search results."""
-    print(bold(f"\nSearch results for: {query}\n"))
+    t = get_active_theme()
+    print(t.bold(f"\nSearch results for: {query}\n"))
     if not results:
-        print(dim("No matching messages found."))
+        print(t.dim("No matching messages found."))
         print()
         return
 
@@ -386,26 +397,28 @@ def render_search_results(query: str, results: List[Dict[str, Any]]) -> None:
         msg_id = m.get("message_id", "")
         content = sanitize_terminal_text(m.get("content", ""))
 
-        print(f"{dim(f'[{time_part}]')} [{cyan(room)}] {dim(f'(ID: {msg_id[:8]})')} {bold(sender)}:")
-        print(f"{content}\n")
+        print(f"{t.dim(f'[{time_part}]')} [{t.primary(room)}] {t.dim(f'(ID: {msg_id[:8]})')} {t.bold(sender)}:")
+        print(f"{t.message(content)}\n")
 
 
 def render_unread(unread: Dict[str, int]) -> None:
     """Renders unread message counts per room."""
-    print(bold("\nUnread Messages\n"))
+    t = get_active_theme()
+    print(t.bold("\nUnread Messages\n"))
     if not unread or all(v == 0 for v in unread.values()):
-        print(dim("No unread messages."))
+        print(t.dim("No unread messages."))
         print()
         return
 
     for room, count in unread.items():
         if count > 0:
-            print(f"{room:<16}: {yellow(str(count))}")
+            print(f"{room:<16}: {t.warning(str(count))}")
     print()
 
 
 def format_announcement(sender: str, content: str) -> str:
     """Formats prominent announcement banner as a string."""
+    t = get_active_theme()
     clean_sender = sanitize_terminal_text(sender)
     clean_content = sanitize_terminal_text(content)
     width = 54
@@ -417,12 +430,12 @@ def format_announcement(sender: str, content: str) -> str:
     border_bot = "╚" + "═" * (width - 2) + "╝"
 
     return "\n" + "\n".join([
-        yellow(border_top),
-        yellow(title_line),
-        yellow(border_mid),
-        yellow(sender_line),
-        bold(content_line),
-        yellow(border_bot),
+        t.warning(border_top),
+        t.warning(title_line),
+        t.warning(border_mid),
+        t.warning(sender_line),
+        t.bold(content_line),
+        t.warning(border_bot),
     ]) + "\n"
 
 
@@ -433,14 +446,15 @@ def render_announcement(sender: str, content: str) -> None:
 
 def render_info(info: Dict[str, Any]) -> None:
     """Renders formatted NetMash information."""
-    print(bold("\nNetMash Information\n"))
-    print(f"{'Version':<16}: {green(str(info.get('version', __version__)))}")
+    t = get_active_theme()
+    print(t.bold("\nNetMash Information\n"))
+    print(f"{'Version':<16}: {t.success(str(info.get('version', __version__)))}")
     print(f"{'Hostname':<16}: {info.get('hostname', '')}")
     if "username" in info:
-        print(f"{'Username':<16}: {cyan(info.get('username', ''))}")
+        print(f"{'Username':<16}: {t.primary(info.get('username', ''))}")
     print(f"{'Platform':<16}: {info.get('os', 'Local Network')}")
     print(f"{'Local Address':<16}: {info.get('local_ip', '127.0.0.1')}")
-    print(f"{'Status':<16}: {green(str(info.get('status', 'ONLINE')))}")
+    print(f"{'Status':<16}: {t.success(str(info.get('status', 'ONLINE')))}")
     if "peers" in info:
         print(f"{'Peers':<16}: {info.get('peers', 0)}")
     if "groups" in info:
@@ -450,42 +464,45 @@ def render_info(info: Dict[str, Any]) -> None:
 
 def render_status(status: Dict[str, Any]) -> None:
     """Renders formatted NetMash status."""
-    print(bold("\nNetMash Status\n"))
-    print(f"{'Server':<16}: {green(str(status.get('server_status', 'ONLINE')))}")
-    print(f"{'Connection':<16}: {green('CONNECTED')}")
+    t = get_active_theme()
+    print(t.bold("\nNetMash Status\n"))
+    print(f"{'Server':<16}: {t.success(str(status.get('server_status', 'ONLINE')))}")
+    print(f"{'Connection':<16}: {t.success('CONNECTED')}")
     print(f"{'Host':<16}: {status.get('host_name', '')}")
-    print(f"{'Network':<16}: {cyan(status.get('network_name', 'NetMash Local'))}")
+    print(f"{'Network':<16}: {t.primary(status.get('network_name', 'NetMash Local'))}")
     print(f"{'Peers':<16}: {status.get('peers_count', 0)}")
     print(f"{'Groups':<16}: {status.get('groups_count', 0)}")
-    print(f"{'Room':<16}: {cyan(str(status.get('room', 'GENERAL')).upper())}")
+    print(f"{'Room':<16}: {t.primary(str(status.get('room', 'GENERAL')).upper())}")
     print(f"{'Uptime':<16}: {status.get('uptime', '00:00:00')}")
     print()
 
 
 def render_admin_menu() -> None:
     """Renders the NetMash Admin interactive menu."""
-    print(bold("\nNetMash Admin"))
-    print(gray("────────────────────────"))
-    print(f" {cyan('1.')} Server Status")
-    print(f" {cyan('2.')} Connected Users")
-    print(f" {cyan('3.')} Groups")
-    print(f" {cyan('4.')} Sessions")
-    print(f" {cyan('5.')} Moderation")
-    print(f" {cyan('6.')} Messages")
-    print(f" {cyan('7.')} Network Diagnostics")
-    print(f" {cyan('8.')} Logs")
-    print(f" {cyan('9.')} Statistics")
-    print(f" {cyan('10.')} Configuration")
-    print(f" {cyan('11.')} Shutdown Server")
-    print(f" {cyan('12.')} Logout")
+    t = get_active_theme()
+    print(t.bold("\nNetMash Admin"))
+    print(t.border("────────────────────────"))
+    print(f" {t.primary('1.')} Server Status")
+    print(f" {t.primary('2.')} Connected Users")
+    print(f" {t.primary('3.')} Groups")
+    print(f" {t.primary('4.')} Sessions")
+    print(f" {t.primary('5.')} Moderation")
+    print(f" {t.primary('6.')} Messages")
+    print(f" {t.primary('7.')} Network Diagnostics")
+    print(f" {t.primary('8.')} Logs")
+    print(f" {t.primary('9.')} Statistics")
+    print(f" {t.primary('10.')} Configuration")
+    print(f" {t.primary('11.')} Shutdown Server")
+    print(f" {t.primary('12.')} Logout")
     print()
 
 
 def render_admin_status(status_data: Dict[str, Any]) -> None:
     """Renders formatted Server Status."""
-    print(bold("\nServer Status"))
-    print(gray("─────────────"))
-    print(f"{'Status':<22}: {green(str(status_data.get('status', 'ONLINE')))}")
+    t = get_active_theme()
+    print(t.bold("\nServer Status"))
+    print(t.border("─────────────"))
+    print(f"{'Status':<22}: {t.success(str(status_data.get('status', 'ONLINE')))}")
     print(f"{'Uptime':<22}: {status_data.get('uptime', '00:00:00')}")
     print(f"{'Host':<22}: {status_data.get('host', 'Host')}")
     print(f"{'Version':<22}: {status_data.get('version', __version__)}")
@@ -497,60 +514,63 @@ def render_admin_status(status_data: Dict[str, Any]) -> None:
 
 def render_admin_users(users: List[Dict[str, Any]]) -> None:
     """Renders administrative view of connected users with immutable node IDs and groups."""
-    print(bold("\nUsers Online"))
-    print(gray("────────────"))
+    t = get_active_theme()
+    print(t.bold("\nUsers Online"))
+    print(t.border("────────────"))
     if not users:
-        print(dim("No users connected."))
+        print(t.dim("No users connected."))
         print()
         return
-    print(f"{bold('NODE ID'):<18} {bold('USERNAME'):<16} {bold('STATUS'):<10} {bold('GROUP'):<12} {bold('CONNECTED SINCE')}")
-    print(gray("─" * 74))
+    print(f"{t.bold('NODE ID'):<18} {t.bold('USERNAME'):<16} {t.bold('STATUS'):<10} {t.bold('GROUP'):<12} {t.bold('CONNECTED SINCE')}")
+    print(t.border("─" * 74))
     for u in users:
         nid = u.get("node_id", "")[:16]
         uname = sanitize_terminal_text(u.get("username", ""))[:14]
         st = u.get("status", "ONLINE")
-        st_str = green("ONLINE") if st == "ONLINE" else (yellow(st) if st == "AWAY" else red(st))
+        st_str = t.success("ONLINE") if st == "ONLINE" else (t.warning(st) if st == "AWAY" else t.error(st))
         room = sanitize_terminal_text(u.get("current_room", "general"))[:10]
         conn_since = u.get("connected_at", "")
         if len(conn_since) >= 19:
             conn_since = conn_since[11:19]
-        print(f"{dim(nid):<27} {cyan(uname):<25} {st_str:<19} {room:<12} {conn_since}")
+        print(f"{t.dim(nid):<27} {t.primary(uname):<25} {st_str:<19} {room:<12} {conn_since}")
     print()
 
 
 def render_admin_groups(groups: List[Dict[str, Any]]) -> None:
     """Renders administrative view of groups with owner and creation time."""
-    print(bold("\nGroups"))
-    print(gray("──────"))
+    t = get_active_theme()
+    print(t.bold("\nGroups"))
+    print(t.border("──────"))
     if not groups:
-        print(dim("No groups available."))
+        print(t.dim("No groups available."))
         print()
         return
-    print(f"{bold('NAME'):<18} {bold('OWNER'):<16} {bold('MEMBERS'):<10} {bold('ACCESS'):<10} {bold('CREATED')}")
-    print(gray("─" * 72))
+    print(f"{t.bold('NAME'):<18} {t.bold('OWNER'):<16} {t.bold('MEMBERS'):<10} {t.bold('ACCESS'):<10} {t.bold('CREATED')}")
+    print(t.border("─" * 72))
     for g in groups:
         name = sanitize_terminal_text(g.get("name", ""))[:16]
         owner = sanitize_terminal_text(g.get("owner", "Host"))[:14]
         members = str(g.get("member_count", g.get("members", 0)))
         access = g.get("access", "PUBLIC")
-        access_str = yellow("PIN") if access == "PIN" else green("PUBLIC")
+        access_str = t.warning("PIN") if access == "PIN" else t.success("PUBLIC")
         created = g.get("created_at", "")
         if len(created) >= 19:
             created = created[11:19]
-        print(f"{cyan(name):<27} {owner:<16} {members:<10} {access_str:<19} {created}")
+        print(f"{t.primary(name):<27} {owner:<16} {members:<10} {access_str:<19} {created}")
     print()
 
 
 def render_admin_sessions(sessions: List[Dict[str, Any]]) -> None:
     """Renders active client sessions without exposing secrets/tokens."""
-    print(bold("\nActive Sessions"))
-    print(gray("───────────────"))
+    t = get_active_theme()
+    print(t.bold("\nActive Sessions"))
+    print(t.border("───────────────"))
     if not sessions:
-        print(dim("No active sessions."))
+        print(t.dim("No active sessions."))
         print()
         return
-    print(f"{bold('SESSION ID'):<14} {bold('NODE ID'):<16} {bold('USERNAME'):<14} {bold('REMOTE ADDR'):<18} {bold('ROOM'):<10} {bold('STATUS')}")
-    print(gray("─" * 84))
+    print(f"{t.bold('SESSION ID'):<14} {t.bold('NODE ID'):<16} {t.bold('USERNAME'):<14} {t.bold('REMOTE ADDR'):<18} {t.bold('ROOM'):<10} {t.bold('STATUS')}")
+    print(t.border("─" * 84))
     for s in sessions:
         sid = s.get("session_id", "")[:12]
         nid = s.get("node_id", "")[:14]
@@ -558,20 +578,21 @@ def render_admin_sessions(sessions: List[Dict[str, Any]]) -> None:
         addr = str(s.get("remote_addr", ""))[:16]
         room = sanitize_terminal_text(s.get("current_room", "general"))[:8]
         st = s.get("status", "ACTIVE")
-        st_str = green(st) if st == "ACTIVE" else yellow(st)
-        print(f"{dim(sid):<23} {dim(nid):<25} {cyan(uname):<23} {addr:<18} {room:<10} {st_str}")
+        st_str = t.success(st) if st == "ACTIVE" else t.warning(st)
+        print(f"{t.dim(sid):<23} {t.dim(nid):<25} {t.primary(uname):<23} {addr:<18} {room:<10} {st_str}")
     print()
 
 
 def render_admin_diagnostics(diag: Dict[str, Any]) -> None:
     """Renders administrative network and system diagnostics."""
-    print(bold("\nNetwork Diagnostics"))
-    print(gray("───────────────────"))
-    print(f"{'Server Address':<22}: {green(str(diag.get('server_address', '127.0.0.1')))}")
+    t = get_active_theme()
+    print(t.bold("\nNetwork Diagnostics"))
+    print(t.border("───────────────────"))
+    print(f"{'Server Address':<22}: {t.success(str(diag.get('server_address', '127.0.0.1')))}")
     print(f"{'Listening Port':<22}: {diag.get('listening_port', DEFAULT_HOST_PORT)}")
     print(f"{'Discovery Port':<22}: {diag.get('discovery_port', DEFAULT_DISCOVERY_PORT)}")
-    print(f"{'WebSocket / Sockets':<22}: {green(str(diag.get('websocket_status', 'ONLINE')))}")
-    print(f"{'Database Status':<22}: {green(str(diag.get('database_status', 'HEALTHY')))}")
+    print(f"{'WebSocket / Sockets':<22}: {t.success(str(diag.get('websocket_status', 'ONLINE')))}")
+    print(f"{'Database Status':<22}: {t.success(str(diag.get('database_status', 'HEALTHY')))}")
     print(f"{'Connected Clients':<22}: {diag.get('connected_clients', 0)}")
     lat = diag.get("latency_ms", 0.0)
     lat_str = f"{lat}ms" if lat > 0 else "<1ms"
@@ -581,28 +602,30 @@ def render_admin_diagnostics(diag: Dict[str, Any]) -> None:
 
 def render_admin_logs(logs: List[Dict[str, Any]]) -> None:
     """Renders server audit logs."""
-    print(bold("\nServer Audit Logs"))
-    print(gray("─────────────────"))
+    t = get_active_theme()
+    print(t.bold("\nServer Audit Logs"))
+    print(t.border("─────────────────"))
     if not logs:
-        print(dim("No logs recorded."))
+        print(t.dim("No logs recorded."))
         print()
         return
     for l in logs:
         ts = l.get("timestamp", "")
         time_part = ts[11:19] if len(ts) >= 19 else ts
         lvl = l.get("level", "INFO")
-        lvl_str = green(lvl) if lvl == "INFO" else (yellow(lvl) if lvl == "WARNING" else red(lvl))
+        lvl_str = t.success(lvl) if lvl == "INFO" else (t.warning(lvl) if lvl == "WARNING" else t.error(lvl))
         msg = sanitize_terminal_text(l.get("message", ""))
-        print(f"{dim(f'[{time_part}]')} [{lvl_str}] {msg}")
+        print(f"{t.dim(f'[{time_part}]')} [{lvl_str}] {msg}")
     print()
 
 
 def render_admin_stats(stats: Dict[str, Any]) -> None:
     """Renders server administrative statistics."""
-    print(bold("\nNetMash Statistics"))
-    print(gray("──────────────────"))
+    t = get_active_theme()
+    print(t.bold("\nNetMash Statistics"))
+    print(t.border("──────────────────"))
     print(f"{'Users':<20}: {stats.get('users_count', 0)}")
-    print(f"{'Online':<20}: {green(str(stats.get('online_count', 0)))}")
+    print(f"{'Online':<20}: {t.success(str(stats.get('online_count', 0)))}")
     print(f"{'Groups':<20}: {stats.get('groups_count', 0)}")
     print(f"{'Messages':<20}: {stats.get('messages_count', 0)}")
     print(f"{'DMs':<20}: {stats.get('dms_count', 0)}")
@@ -614,8 +637,9 @@ def render_admin_stats(stats: Dict[str, Any]) -> None:
 
 def render_admin_config(cfg: Dict[str, Any]) -> None:
     """Renders safe server configuration parameters."""
-    print(bold("\nServer Configuration"))
-    print(gray("────────────────────"))
+    t = get_active_theme()
+    print(t.bold("\nServer Configuration"))
+    print(t.border("────────────────────"))
     for k, v in cfg.items():
         print(f"{k:<22}: {v}")
     print()
@@ -667,77 +691,108 @@ def render_invalid_theme() -> None:
 
 
 def print_help() -> None:
-    """Prints categorized interactive chat commands."""
+    """Prints categorized interactive chat commands with clean, consistent column alignment."""
+    theme = get_active_theme()
     theme_count = get_theme_count()
-    print(bold("\nInteractive Commands\n"))
 
-    print(bold("General"))
-    print(f"  {cyan('/help')}                       Show this help message")
-    print(f"  {cyan('/users')}, {cyan('/peers')}              List connected peers and latency")
-    print(f"  {cyan('/groups')}                     List all available groups")
-    print(f"  {cyan('/room')}                       Show current active room")
-    print(f"  {cyan('/general')}                    Quick jump back to GENERAL room")
-    print(f"  {cyan('/online')}                     View online peers or set status to ONLINE")
-    print(f"  {cyan('/whoami')}                     Show your persistent node identity")
+    def fmt(cmd_str: str, desc_str: str) -> str:
+        # Pre-pad command name to 32 chars before styling to guarantee perfect column alignment
+        return f"  {theme.primary(f'{cmd_str:<32}')} {desc_str}"
 
-    print(bold("\nGroups"))
-    print(f"  {cyan('/create <name> [pin]')}        Create a new group (public or PIN-protected)")
-    print(f"  {cyan('/create-pin <name> <pin>')}    Quick-create a 4-digit PIN protected group")
-    print(f"  {cyan('/join <name> [pin]')}          Join a group (or switch to it)")
-    print(f"  {cyan('/switch <name>')}              Switch active room without re-entering PIN")
-    print(f"  {cyan('/leave [name]')}               Leave group and return to GENERAL")
-    print(f"  {cyan('/members [name]')}             Show group owner, moderators, and members")
-    print(f"  {cyan('/setpin <name> [pin]')}        Set or update 4-digit PIN (owner only)")
-    print(f"  {cyan('/removepin <name>')}           Remove PIN and make group public (owner only)")
-    print(f"  {cyan('/kick <user>')}                Kick member from group (owner/moderator)")
-    print(f"  {cyan('/ban <user>')}                 Ban member from group (owner/moderator)")
-    print(f"  {cyan('/unban <user>')}               Unban member from group (owner only)")
-    print(f"  {cyan('/delete [group]')}             Permanently delete group (owner only)")
-    print(f"  {cyan('/announce <msg>')}             Broadcast announcement banner to room")
+    print(theme.bold("\nInteractive Commands\n"))
 
-    print(bold("\nCommunication"))
-    print(f"  {cyan('/dm <user> [msg]')}            Direct message a peer")
-    print(f"  {cyan('/history [limit]')}            View recent message history in room")
-    print(f"  {cyan('/search <text>')}              Search message history across accessible rooms")
-    print(f"  {cyan('/unread')}                     View unread message counts per room")
-    print(f"  {cyan('/reply <msg_id> <msg>')}       Reply to a specific message")
-    print(f"  {cyan('/edit <msg_id> <new_msg>')}    Edit your previously sent message")
-    print(f"  {cyan('/delete <msg_id>')}            Delete a message (soft delete)")
-    print(f"  {cyan('/pin <msg_id>')}               Pin an important message in room")
-    print(f"  {cyan('/unpin <msg_id>')}             Unpin a message in room")
-    print(f"  {cyan('/send <file>')}                Securely send file to peer or room")
+    print(theme.bold("General"))
+    print(fmt("/help", "Show this help message"))
+    print(fmt("/users, /peers", "List connected peers and latency"))
+    print(fmt("/groups", "List all available groups"))
+    print(fmt("/room", "Show current active room"))
+    print(fmt("/general", "Quick jump back to GENERAL room"))
+    print(fmt("/online", "View online peers or set status to ONLINE"))
+    print(fmt("/whoami", "Show your persistent node identity"))
 
-    print(bold("\nPresence & Notifications"))
-    print(f"  {cyan('/away')}                       Set status to AWAY")
-    print(f"  {cyan('/busy')}                       Set status to BUSY")
-    print(f"  {cyan('/mute <room>')}                Mute notification indicators for a room")
-    print(f"  {cyan('/unmute <room>')}              Unmute notification indicators for a room")
-    print(f"  {cyan('/notify on|off')}              Toggle terminal message notifications")
+    print(theme.bold("\nGroups"))
+    print(fmt("/create <name> [pin]", "Create a new group (public or PIN-protected)"))
+    print(fmt("/create-pin <name> <pin>", "Quick-create a 4-digit PIN protected group"))
+    print(fmt("/join <name> [pin]", "Join a group (or switch to it)"))
+    print(fmt("/switch <name>", "Switch active room without re-entering PIN"))
+    print(fmt("/leave [name]", "Leave group and return to GENERAL"))
+    print(fmt("/members [name]", "Show group owner, moderators, and members"))
+    print(fmt("/setpin <name> [pin]", "Set or update 4-digit PIN (owner only)"))
+    print(fmt("/removepin <name>", "Remove PIN and make group public (owner only)"))
+    print(fmt("/kick <user>", "Kick member from group (owner/moderator)"))
+    print(fmt("/ban <user>", "Ban member from group (owner/moderator)"))
+    print(fmt("/unban <user>", "Unban member from group (owner only)"))
+    print(fmt("/delete [group]", "Permanently delete group (owner only)"))
+    print(fmt("/announce <msg>", "Broadcast announcement banner to room"))
 
-    print(bold("\nNetwork & Diagnostics"))
-    print(f"  {cyan('/info')}                       Show local node and platform info")
-    print(f"  {cyan('/netinfo')}                    Show local network interfaces and subnet")
-    print(f"  {cyan('/status')}                     Show host status and uptime")
-    print(f"  {cyan('/stats')}                      Show network throughput and server metrics")
-    print(f"  {cyan('/diagnose')}                   Run full diagnostic suite & remediation hints")
-    print(f"  {cyan('/reconnect')}                  Reconnect to host or discover new host")
-    print(f"  {cyan('/network-name <name>')}        Rename LAN session network name")
+    print(theme.bold("\nCommunication"))
+    print(fmt("/dm <user> [msg]", "Direct message a peer"))
+    print(fmt("/history [limit]", "View recent message history in room"))
+    print(fmt("/search <text>", "Search message history across accessible rooms"))
+    print(fmt("/unread", "View unread message counts per room"))
+    print(fmt("/reply <msg_id> <msg>", "Reply to a specific message"))
+    print(fmt("/edit <msg_id> <new_msg>", "Edit your previously sent message"))
+    print(fmt("/delete <msg_id>", "Delete a message (soft delete)"))
+    print(fmt("/pin <msg_id>", "Pin an important message in room"))
+    print(fmt("/unpin <msg_id>", "Unpin a message in room"))
+    print(fmt("/send <file>", "Securely send file to peer or room"))
 
-    print(bold("\nApplication"))
-    print(f"  {cyan('/name <new_name>')}            Change your display name")
-    print(f"  {cyan(f'/theme [1-{theme_count}|random]')}   Change terminal theme")
-    print(f"  {cyan('/version')}                    Show NetMash, Python, and platform versions")
-    print(f"  {cyan('/check-update')}               Check GitHub for updates without installing")
-    print(f"  {cyan('/update')}                     Download and apply update from GitHub")
-    print(f"  {cyan('/restart')}                    Restart NetMash session")
-    print(f"  {cyan('/clear')}                      Clear terminal screen")
-    print(f"  {cyan('/exit')}, {cyan('/quit')}              Disconnect and exit")
+    print(theme.bold("\nPresence & Notifications"))
+    print(fmt("/away", "Set status to AWAY"))
+    print(fmt("/busy", "Set status to BUSY"))
+    print(fmt("/mute <room>", "Mute notification indicators for a room"))
+    print(fmt("/unmute <room>", "Unmute notification indicators for a room"))
+    print(fmt("/notify on|off", "Toggle terminal message notifications"))
+
+    print(theme.bold("\nNetwork & Diagnostics"))
+    print(fmt("/info", "Show local node and platform info"))
+    print(fmt("/netinfo", "Show local network interfaces and subnet"))
+    print(fmt("/status", "Show host status and uptime"))
+    print(fmt("/stats", "Show network throughput and server metrics"))
+    print(fmt("/diagnose", "Run full diagnostic suite & remediation hints"))
+    print(fmt("/reconnect", "Reconnect to host or discover new host"))
+    print(fmt("/network-name <name>", "Rename LAN session network name"))
+
+    print(theme.bold("\nApplication"))
+    print(fmt("/name <new_name>", "Change your display name"))
+    print(fmt(f"/theme [1-{theme_count}|random]", "Change terminal theme"))
+    print(fmt("/version", "Show NetMash, Python, and platform versions"))
+    print(fmt("/check-update", "Check GitHub for updates without installing"))
+    print(fmt("/update", "Download and apply update from GitHub"))
+    print(fmt("/restart", "Restart NetMash session"))
+    print(fmt("/clear", "Clear terminal screen"))
+    print(fmt("/exit, /quit", "Disconnect and exit"))
     print()
 
 
 def clear_screen() -> None:
     """Clears the terminal screen."""
     os.system("cls" if sys.platform == "win32" else "clear")
+
+
+def redraw_screen(
+    client: NetMashClient,
+    input_manager: Optional[TerminalInputManager] = None,
+    notice: Optional[str] = None,
+) -> None:
+    """
+    Clears the screen and redraws the entire visible NetMash interface in the active theme.
+    Preserves active room, username, node identity, server info, typed buffer, and cursor position.
+    """
+    clear_screen()
+    print_banner()
+    host_name = client.server_info.get("host_name", "Host")
+    network_title = client.server_info.get("network_name", "NetMash")
+    room_name = (client.current_room or "general").upper()
+    print_divider(f"{network_title} | {room_name} | Host: {host_name}")
+    theme = get_active_theme()
+    print(theme.dim(f"You are: {client.identity.username} ({client.identity.hostname})"))
+    if notice:
+        print(notice)
+    else:
+        print()
+    if input_manager:
+        input_manager.redraw_input()
 
 
 async def run_interactive_chat(
@@ -789,6 +844,7 @@ async def run_interactive_chat(
 
     # Event Callbacks
     def on_chat(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         payload = msg.payload
         room = sanitize_terminal_text(payload.get("room", "general")).lower()
         sender = sanitize_terminal_text(payload.get("sender_name", "Unknown"))
@@ -803,19 +859,20 @@ async def run_interactive_chat(
         if room != client.current_room.lower():
             unread_counts[room] = unread_counts.get(room, 0) + 1
             if notifications_enabled and room not in muted_rooms:
-                input_manager.print_event(yellow(f"🔔 New message in [{room.upper()}] from {sender}"))
+                input_manager.print_event(t.warning(f"🔔 New message in [{room.upper()}] from {sender}"))
             return
 
-        sender_label = green(f"{sender} (You)") if is_self else cyan(sender)
-        id_tag = dim(f"({msg_id[:8]}) ") if msg_id else ""
+        sender_label = t.success(f"{sender} (You)") if is_self else t.primary(sender)
+        id_tag = t.dim(f"({msg_id[:8]}) ") if msg_id else ""
 
-        event_text = f"{dim(f'[{now_str}]')} {id_tag}{sender_label}:\n"
+        event_text = f"{t.dim(f'[{now_str}]')} {id_tag}{sender_label}:\n"
         if reply_to:
-            event_text += f"{dim(f'↳ Replying to: {reply_to[:8]}')}\n"
-        event_text += f"{content}\n"
+            event_text += f"{t.dim(f'↳ Replying to: {reply_to[:8]}')}\n"
+        event_text += f"{t.message(content)}\n"
         input_manager.print_event(event_text)
 
     def on_dm(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         payload = msg.payload
         sender = sanitize_terminal_text(payload.get("sender_name", "Unknown"))
         target = sanitize_terminal_text(payload.get("target", ""))
@@ -823,33 +880,37 @@ async def run_interactive_chat(
         now_str = datetime.datetime.now().strftime("%H:%M")
 
         is_sender = payload.get("sender_id") == client.identity.node_id
-        tag = magenta(f"[DM to {target}]") if is_sender else magenta(f"[DM from {sender}]")
+        tag = t.accent(f"[DM to {target}]") if is_sender else t.accent(f"[DM from {sender}]")
 
-        input_manager.print_event(f"{dim(f'[{now_str}]')} {tag}:\n{content}\n")
+        input_manager.print_event(f"{t.dim(f'[{now_str}]')} {tag}:\n{t.message(content)}\n")
 
     def on_presence(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         user = sanitize_terminal_text(msg.payload.get("username", ""))
         st = msg.payload.get("status", "ONLINE")
-        st_color = green(st) if st == "ONLINE" else (yellow(st) if st == "AWAY" else red(st))
-        input_manager.print_event(gray(f"• {user} is now {st_color}"))
+        st_color = t.success(st) if st == "ONLINE" else (t.warning(st) if st == "AWAY" else t.error(st))
+        input_manager.print_event(t.muted(f"• {user} is now {st_color}"))
 
     def on_edit(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         mid = msg.payload.get("message_id", "")[:8]
         new_c = sanitize_terminal_text(msg.payload.get("content", ""))
-        input_manager.print_event(gray(f"✎ Message ({mid}) edited: {new_c}"))
+        input_manager.print_event(t.muted(f"✎ Message ({mid}) edited: {new_c}"))
 
     def on_delete(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         mid = msg.payload.get("message_id", "")[:8]
-        input_manager.print_event(gray(f"🗑 Message ({mid}) was deleted"))
+        input_manager.print_event(t.muted(f"🗑 Message ({mid}) was deleted"))
 
     def on_pin(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         pinned = msg.payload.get("pinned", True)
         mid = msg.payload.get("message_id", "")[:8]
         cnt = sanitize_terminal_text(msg.payload.get("content", ""))
         if pinned:
-            input_manager.print_event(yellow(f"📌 Message pinned ({mid}): {cnt}"))
+            input_manager.print_event(t.warning(f"📌 Message pinned ({mid}): {cnt}"))
         else:
-            input_manager.print_event(gray(f"Message ({mid}) unpinned"))
+            input_manager.print_event(t.muted(f"Message ({mid}) unpinned"))
 
     def on_announce(msg: NetMashMessage) -> None:
         sender = msg.payload.get("sender_name", "Host")
@@ -857,10 +918,12 @@ async def run_interactive_chat(
         input_manager.print_event(format_announcement(sender, cnt))
 
     def on_netname(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         new_n = sanitize_terminal_text(msg.payload.get("network_name", "NetMash"))
-        input_manager.print_event(cyan(f"Network session renamed to: {new_n}"))
+        input_manager.print_event(t.primary(f"Network session renamed to: {new_n}"))
 
     def on_file_off(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         fid = msg.payload.get("file_id", "")
         fname = sanitize_filename(msg.payload.get("name", "file"))
         size = msg.payload.get("size", 0)
@@ -878,12 +941,12 @@ async def run_interactive_chat(
         }
 
         offer_text = (
-            f"{yellow('📥 Incoming File Transfer Offer:')}\n"
-            f"  From    : {cyan(sender)}\n"
+            f"{t.warning('📥 Incoming File Transfer Offer:')}\n"
+            f"  From    : {t.primary(sender)}\n"
             f"  Filename: {fname}\n"
             f"  Size    : {size_mb} MB ({size} bytes)\n"
-            f"  SHA-256 : {dim(sha[:16])}...\n"
-            f"  Type {green('/accept ' + fid[:8])} or {red('/reject ' + fid[:8])}\n"
+            f"  SHA-256 : {t.dim(sha[:16])}...\n"
+            f"  Type {t.success('/accept ' + fid[:8])} or {t.error('/reject ' + fid[:8])}\n"
         )
         input_manager.print_event(offer_text)
 
@@ -897,6 +960,7 @@ async def run_interactive_chat(
             incoming_transfers[fid]["chunks"][idx] = raw
 
     def on_file_cmp(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         fid = msg.payload.get("file_id", "")
         if fid in incoming_transfers:
             info = incoming_transfers[fid]
@@ -912,28 +976,32 @@ async def run_interactive_chat(
             calc_sha = calculate_sha256(out_path)
             if calc_sha == info["sha256"]:
                 input_manager.print_event(
-                    f"{green(f'✓ File received successfully: {clean_name}')}\n"
-                    + dim(f"  Saved to: {out_path}\n")
+                    f"{t.success(f'✓ File received successfully: {clean_name}')}\n"
+                    + t.dim(f"  Saved to: {out_path}\n")
                 )
             else:
-                input_manager.print_event(red(f"✗ Integrity check failed for {clean_name}\n"))
+                input_manager.print_event(t.error(f"✗ Integrity check failed for {clean_name}\n"))
 
     def on_join(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         user = sanitize_terminal_text(msg.payload.get("username", "Someone"))
-        input_manager.print_event(gray(f"→ {user} joined NetMash"))
+        input_manager.print_event(t.muted(f"→ {user} joined NetMash"))
 
     def on_leave(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         user = sanitize_terminal_text(msg.payload.get("username", "Someone"))
-        input_manager.print_event(gray(f"← {user} left NetMash"))
+        input_manager.print_event(t.muted(f"← {user} left NetMash"))
 
     def on_name(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         old_name = sanitize_terminal_text(msg.payload.get("old_name", ""))
         new_name = sanitize_terminal_text(msg.payload.get("new_name", ""))
-        input_manager.print_event(gray(f"• {old_name} is now known as {new_name}"))
+        input_manager.print_event(t.muted(f"• {old_name} is now known as {new_name}"))
 
     def on_error(msg: NetMashMessage) -> None:
+        t = get_active_theme()
         err_msg = sanitize_terminal_text(msg.payload.get("message", "An error occurred."))
-        input_manager.print_event(f"{red('Error:')} {err_msg}")
+        input_manager.print_event(f"{t.error('Error:')} {err_msg}")
 
     client.on_chat_message = on_chat
     client.on_dm = on_dm
@@ -1149,7 +1217,8 @@ async def run_interactive_chat(
                         groups = await client.list_groups()
                         render_groups_table(groups, current_room=client.current_room)
                     elif cmd == "/room":
-                        print(f"Current active room: {bright_cyan(client.current_room.upper())}")
+                        t = get_active_theme()
+                        print(f"Current active room: {t.accent(client.current_room.upper())}")
                     elif cmd == "/name":
                         if not cmd_args:
                             print(red("Usage: /name <new_name>"))
@@ -1164,13 +1233,19 @@ async def run_interactive_chat(
                             arg = cmd_args[0].strip().lower()
                             if arg == "random":
                                 prev_t, new_t = set_random_theme(persist=True)
-                                print(f"\n{new_t.bold('Theme changed randomly.')}\n")
-                                print(f"Previous: {prev_t.name}")
-                                print(f"New: {new_t.accent(new_t.name)}\n")
+                                redraw_screen(
+                                    client=client,
+                                    input_manager=input_manager,
+                                    notice=f"{new_t.bold('Theme changed randomly.')}\n\nPrevious: {prev_t.name}\nNew: {new_t.accent(new_t.name)}\n",
+                                )
                             else:
                                 new_theme = set_active_theme(arg, persist=True)
                                 if new_theme:
-                                    print(new_theme.success(f"✓ Theme set to {new_theme.name} ({new_theme.style_desc})."))
+                                    redraw_screen(
+                                        client=client,
+                                        input_manager=input_manager,
+                                        notice=new_theme.success(f"✓ Theme set to {new_theme.name} ({new_theme.style_desc}).\n"),
+                                    )
                                 else:
                                     render_invalid_theme()
 
@@ -1670,9 +1745,7 @@ async def run_interactive_chat(
                         _save_readline_history(history_file)
                         os.execv(sys.executable, [sys.executable] + sys.argv)
                     elif cmd == "/clear":
-                        clear_screen()
-                        print_banner()
-                        print_divider(f"NetMash | {client.current_room.upper()} | Host: {host_name}")
+                        redraw_screen(client=client, input_manager=input_manager)
                     else:
                         print(yellow("Unknown command. Use /help to see available commands."))
                 elif is_admin_mode and text.lower() in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "menu"):

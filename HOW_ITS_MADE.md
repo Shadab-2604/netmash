@@ -571,33 +571,34 @@ NetMash includes a dedicated two-instance integration test suite (`tests/integra
 
 ### Verified Features & Test Results
 Every implemented feature was executed and validated across the two live instances:
-1. **Local Theme Isolation & Persistence**: Instance A selects Theme 3 (Matrix) and Instance B selects Theme 2 (Ocean). Changes on Instance A (switching to Dracula) do not alter Instance B's theme, and each preference persists independently in `config.json`.
-2. **Admin Isolation & Privilege Verification**: Instance A authenticates with `/admin`, receiving prompt `netmash[ADMIN]>general> `; Instance B (normal user) attempting admin commands is rejected with `PERMISSION_DENIED`.
-3. **Admin Operations & Moderation**: Instance A queries status, users with Node IDs, sessions, diagnostics, logs, and triggers moderation without leaking secrets.
-4. **Controlled Server Shutdown**: Admin initiates shutdown; both Instance A and Instance B receive `SERVER_SHUTDOWN_BROADCAST` and close cleanly.
-5. **Dynamic Prompt Isolation & Transitions**: Instance A in `developers` and Instance B in `gaming` maintain separate dynamic prompts in real-time.
-6. **Discovery & Identity**: Distinct UUIDs, isolated database paths, mutual peer discovery.
-7. **General Chat**: Two-way messaging with timestamping, message IDs, and room routing.
-8. **Input Persistence Bug Regression Test**: Alice typed `this message must survive` while Bob sent chats, DMs, presence changes, and announcements. Alice's input buffer remained 100% intact with prompt preserved.
-9. **Display Name Changes (`/name`)**: Real-time name broadcast and routing preservation.
-10. **Groups & PIN Protection (`/create`, `/create-pin`, `/join`, `/setpin`, `/removepin`)**: Access control, 4-digit PIN verification, wrong PIN rejection, owner-only PIN reconfiguration.
-11. **Direct Messages (`/dm`)**: Private peer-to-peer messaging isolated from public channels.
-12. **History & Search (`/history`, `/search`)**: Room-scoped pagination and full-text keyword search.
-13. **Message Operations (`/reply`, `/edit`, `/delete`, `/pin`)**: Threaded replies, live edits, soft deletion, and message pinning with permission checks.
-14. **Presence (`/away`, `/busy`, `/online`)**: Status broadcasting and peer list synchronization.
-15. **Group Moderation (`/kick`, `/ban`, `/unban`, `/delete`)**: Role-based access control, temporary ejection, permanent bans, unbanning, and group deletion.
-16. **Announcements (`/announce`)**: Visual alert banner broadcast.
-17. **Diagnostics & Stats (`/diagnose`, `/stats`, `/netinfo`)**: Full diagnostic checks and metric counters.
-18. **File Transfer (`/send`, `/accept`, `/reject`)**: Chunked transmission, SHA-256 verification, and path traversal sanitization.
-19. **Reconnect (`/reconnect`)**: Session disconnect and dynamic reconnection.
+1. **Dynamic Theme Redraw & Local Isolation**: Instance A selects Theme 3 (Matrix) and Instance B selects Theme 2 (Ocean). Running `/theme <id>` or `/theme random` immediately triggers a full terminal screen redraw (`redraw_screen()`), rendering banner, divider header, identity, and prompt in the new theme while preserving active room, input buffer, and cursor position. Local themes persist independently in `config.json`.
+2. **Presence Events Without Protocol Errors**: Alice changes status via `/away`, `/busy`, and `/online`. Bob receives and parses every presence event seamlessly without `Unknown message type 'presence_update'` errors, even while actively typing in the terminal.
+3. **Full /help Command Audit**: End-to-end verification of all interactive commands (`/help`, `/users`, `/peers`, `/groups`, `/create`, `/create-pin`, `/join`, `/switch`, `/leave`, `/members`, `/setpin`, `/removepin`, `/kick`, `/ban`, `/unban`, `/delete`, `/announce`, `/dm`, `/history`, `/search`, `/unread`, `/reply`, `/edit`, `/pin`, `/unpin`, `/send`, `/away`, `/busy`, `/online`, `/mute`, `/unmute`, `/notify`, `/info`, `/netinfo`, `/status`, `/stats`, `/diagnose`, `/reconnect`, `/network-name`, `/name`, `/theme`, `/version`, `/check-update`, `/update`, `/restart`, `/clear`, `/exit`, `/quit`).
+4. **Admin Isolation & Privilege Verification**: Instance A authenticates with `/admin`, receiving prompt `netmash[ADMIN]>general> `; Instance B (normal user) attempting admin commands is rejected with `PERMISSION_DENIED`.
+5. **Admin Operations & Moderation**: Instance A queries status, users with Node IDs, sessions, diagnostics, logs, and triggers moderation without leaking secrets.
+6. **Controlled Server Shutdown**: Admin initiates shutdown; both Instance A and Instance B receive `SERVER_SHUTDOWN_BROADCAST` and close cleanly.
+7. **Dynamic Prompt Isolation & Transitions**: Instance A in `developers` and Instance B in `gaming` maintain separate dynamic prompts in real-time.
+8. **Discovery & Identity**: Distinct UUIDs, isolated database paths, mutual peer discovery.
+9. **General Chat**: Two-way messaging with timestamping, message IDs, and room routing.
+10. **Input Persistence Bug Regression Test**: Alice typed `this message must survive` while Bob sent chats, DMs, presence changes, and announcements. Alice's input buffer remained 100% intact with prompt preserved.
+11. **Display Name Changes (`/name`)**: Real-time name broadcast and routing preservation.
+12. **Groups & PIN Protection (`/create`, `/create-pin`, `/join`, `/setpin`, `/removepin`)**: Access control, 4-digit PIN verification, wrong PIN rejection, owner-only PIN reconfiguration.
+13. **Direct Messages (`/dm`)**: Private peer-to-peer messaging isolated from public channels.
+14. **History & Search (`/history`, `/search`)**: Room-scoped pagination and full-text keyword search.
+15. **Message Operations (`/reply`, `/edit`, `/delete`, `/pin`)**: Threaded replies, live edits, soft deletion, and message pinning with permission checks.
+16. **Group Moderation (`/kick`, `/ban`, `/unban`, `/delete`)**: Role-based access control, temporary ejection, permanent bans, unbanning, and group deletion.
+17. **Announcements (`/announce`)**: Visual alert banner broadcast.
+18. **Diagnostics & Stats (`/diagnose`, `/stats`, `/netinfo`)**: Full diagnostic checks and metric counters.
+19. **File Transfer (`/send`, `/accept`, `/reject`)**: Chunked transmission, SHA-256 verification, and path traversal sanitization.
+20. **Reconnect (`/reconnect`)**: Session disconnect and dynamic reconnection.
 
 ---
 
 ## 30. Testing Architecture
 
 Comprehensive test suite in `tests/`:
-- `tests/integration/test_two_instances.py`: Complete two-instance live integration test suite (14 tests).
-- `tests/test_theme.py`: Theme registry, semantic styling, lookups, random selection, plain-text fallback, and config persistence (10 tests).
+- `tests/integration/test_two_instances.py`: Complete two-instance live integration test suite (16 tests).
+- `tests/test_theme.py`: Theme registry, semantic styling, lookups, random selection, plain-text fallback, dynamic redraw, help alignment, and config persistence (12 tests).
 - `tests/test_admin.py`: Scrypt password hashing, verification, AdminAttemptLimiter brute-force lockout, admin inspection, moderation, and session lifecycle tests (5 tests).
 - `tests/test_dynamic_prompt.py`: Unit and integration tests for dynamic prompt evaluation, room transitions, failure immutability, and multi-instance prompt isolation (3 tests).
 - `tests/test_terminal_input.py`: TerminalInputManager and input buffer persistence tests (5 tests).
@@ -612,7 +613,7 @@ Comprehensive test suite in `tests/`:
 - `tests/test_discovery.py`: UDP discovery responder and probes (1 test).
 - `tests/test_updater.py`: Git commit resolution and updater APIs (3 tests).
 
-Total: **65 passing tests** executed in automated test runner.
+Total: **69 passing tests** executed in automated test runner.
 
 Run tests:
 ```bash

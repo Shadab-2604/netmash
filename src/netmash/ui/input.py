@@ -168,6 +168,20 @@ class TerminalInputManager:
             
         sys.stdout.flush()
 
+    def redraw_input(self) -> None:
+        """
+        Explicitly triggers a re-render of the prompt, current buffer, and cursor.
+        Used after full screen clears or dynamic theme updates.
+        """
+        with self._lock:
+            if self._active:
+                self._raw_redraw()
+            else:
+                p = self._prompt
+                prompt_str = str(p()) if callable(p) else str(p)
+                sys.stdout.write(f"\r\033[2K{prompt_str}")
+                sys.stdout.flush()
+
     def print_event(self, text: str) -> None:
         """
         Safely renders an incoming asynchronous event.
