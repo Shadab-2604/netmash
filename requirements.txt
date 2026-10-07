@@ -1,0 +1,7 @@
+# NetMash Core Requirements
+# NetMash relies exclusively on Python standard library modules (asyncio, socket, sqlite3, hashlib)
+# for zero-dependency, high-speed execution across Windows, Linux, macOS, WSL, and Android/Termux.
+
+# Optional development & testing dependencies:
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
