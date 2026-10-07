@@ -2,6 +2,11 @@
 
 > **Connect. Discover. Chat.**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20WSL%20%7C%20Android-green)](https://github.com/Shadab-2604/netmash)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-Shadab--2604%2Fnetmash-181717?logo=github)](https://github.com/Shadab-2604/netmash)
+
 NetMash is a local-network peer communication and discovery platform built for terminals. It works like Discord/IRC for your local area network (LAN), requiring **zero configuration**, no central cloud servers, and no manual IP address entry.
 
 ---
