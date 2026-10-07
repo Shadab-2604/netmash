@@ -27,6 +27,28 @@ pip install .
 
 *Tip: After installation, the `netmash` command will be available globally in your terminal.*
 
+### 🔄 Already Installed? How to Update Manually (For Existing Users)
+
+If you already have NetMash installed and want to update to the latest version:
+
+#### Method 1: Using the Built-in Updater
+```bash
+netmash update
+```
+*(Or simply type `/update` directly inside an active chat session)*
+
+#### Method 2: Update via Pip
+```bash
+pip install --upgrade --no-cache-dir git+https://github.com/Shadab-2604/netmash.git
+```
+
+#### Method 3: Update via Git Clone
+```bash
+cd netmash
+git pull origin main
+pip install -e .
+```
+
 ---
 
 ## 2. Quick Start
