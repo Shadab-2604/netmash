@@ -1,0 +1,3 @@
+"""
+NetMash chat management package.
+"""

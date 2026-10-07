@@ -1,0 +1,3 @@
+"""
+NetMash groups management package.
+"""
