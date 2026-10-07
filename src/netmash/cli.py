@@ -42,6 +42,7 @@ from netmash.ui.terminal import (
 )
 from netmash.updater import (
     apply_update,
+    apply_update_async,
     check_for_updates,
     check_for_updates_async,
 )

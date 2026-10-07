@@ -11,16 +11,80 @@ NetMash is a local-network peer communication and discovery platform built for t
 
 ---
 
-## 1. What is NetMash?
+## 1. Quick Installation
 
-When you run `netmash`, it automatically searches your reachable Wi-Fi or Ethernet network for an active NetMash host using UDP Multicast and Broadcast discovery.
+### Option A: Install from GitHub with Pip
+```bash
+pip install git+https://github.com/Shadab-2604/netmash.git
+```
 
-- If an active NetMash host is found on the local network, you are automatically connected and placed into the **GENERAL** room.
-- If no NetMash host is active, your machine automatically initializes a host session, enables discovery, creates the **GENERAL** room, and allows other peers on your local network to connect instantly.
+### Option B: Clone & Install Locally
+```bash
+git clone https://github.com/Shadab-2604/netmash.git
+cd netmash
+pip install .
+```
+
+*Tip: After installation, the `netmash` command will be available globally in your terminal.*
 
 ---
 
-## 2. Features
+## 2. Quick Start
+
+### First User (Automatic Host)
+```bash
+netmash
+```
+```text
+╭──────────────────────────────────────────╮
+│                 NETMASH                  │
+│         Connect. Discover. Chat.         │
+╰──────────────────────────────────────────╯
+
+Searching for NetMash host on local network...
+
+No NetMash host found on the local network.
+Starting a new NetMash host...
+✓ Host started
+✓ Discovery enabled
+✓ GENERAL room created
+
+────────────────── NetMash | GENERAL ──────────────────
+You are: SHAIK-PC (SHAIK-PC)
+Type a message to chat, or /help for available commands.
+
+netmash> Hello everyone!
+```
+
+### Second User (Automatic Discovery & Connect)
+```bash
+netmash
+```
+```text
+╭──────────────────────────────────────────╮
+│                 NETMASH                  │
+│         Connect. Discover. Chat.         │
+╰──────────────────────────────────────────╯
+
+Searching for NetMash host on local network...
+
+✓ NetMash host discovered: SHAIK-PC
+Connecting...
+✓ Connected.
+
+────────────────── NetMash | GENERAL ──────────────────
+You are: ALI-PC (ALI-PC)
+Type a message to chat, or /help for available commands.
+
+[14:05] SHAIK-PC:
+Hello everyone!
+
+netmash> Hello Shaik!
+```
+
+---
+
+## 3. Features & Architecture
 
 - **Zero-Config Automatic Peer Discovery**: Uses UDP multicast (`239.255.77.88:8766`) with automatic broadcast (`255.255.255.255:8766`) fallback.
 - **Host / Client Architecture**: First node becomes host, subsequent nodes connect as clients.
@@ -32,17 +96,14 @@ When you run `netmash`, it automatically searches your reachable Wi-Fi or Ethern
   - Owner PIN management (`/setpin`, `/removepin`).
 - **Direct Messaging (DM)**: Private peer-to-peer messaging via `/dm <user>` or `netmash dm <user>`.
 - **Peer & Node Inspection**: View online peers, host status, and network information with `-n`, `-s`, and `-i`.
+- **Built-in Auto Updater**: Check and install updates directly from GitHub with `netmash update` or `/update`.
 - **Security by Design**:
   - 4-digit PINs are hashed using **Scrypt** (memory-hard password hashing).
   - PIN brute-force defense: Failed attempts trigger progressive delays and lockouts.
   - **Terminal Sanitization**: All ANSI escape sequences and control characters are stripped from incoming chat messages to prevent terminal injection.
   - Token-bucket message rate limiting.
-- **Cross-Platform Compatibility**: Tested and supported on **Windows 10/11**, **Linux / Ubuntu**, **macOS**, **WSL**, and **Android / Termux**.
-- **Minimal Dependencies**: Built entirely using Python standard library primitives (`asyncio`, `socket`, `sqlite3`, `hashlib`), ensuring seamless installation without C-compiler hurdles.
-
----
-
-## 3. Architecture
+- **Cross-Platform Compatibility**: Supported on **Windows 10/11**, **Linux / Ubuntu**, **macOS**, **WSL**, and **Android / Termux**.
+- **Minimal Dependencies**: Built using Python standard library primitives (`asyncio`, `socket`, `sqlite3`, `hashlib`), ensuring seamless installation without C-compiler hurdles.
 
 ```text
                     LOCAL NETWORK (LAN)
@@ -68,89 +129,7 @@ When you run `netmash`, it automatically searches your reachable Wi-Fi or Ethern
 
 ---
 
-## 4. Installation & Setup
-
-### Option 1: Standard Installation
-
-```bash
-git clone https://github.com/Shadab-2604/netmash.git
-cd netmash
-pip install .
-```
-
-### Option 2: Development & Testing Setup
-
-```bash
-git clone https://github.com/Shadab-2604/netmash.git
-cd netmash
-pip install -r requirements.txt
-pip install -e .
-```
-
----
-
-## 5. Quick Start
-
-### Machine A (First User)
-
-```bash
-netmash
-```
-
-Output:
-```text
-╭──────────────────────────────────────────╮
-│                 NETMASH                  │
-│         Connect. Discover. Chat.         │
-╰──────────────────────────────────────────╯
-
-Searching for NetMash host on local network...
-
-No NetMash host found on the local network.
-Starting a new NetMash host...
-✓ Host started
-✓ Discovery enabled
-✓ GENERAL room created
-
-────────────────── NetMash | GENERAL ──────────────────
-You are: SHAIK-PC (SHAIK-PC)
-Type a message to chat, or /help for available commands.
-
-netmash> Hello everyone!
-```
-
-### Machine B (Second User)
-
-```bash
-netmash
-```
-
-Output:
-```text
-╭──────────────────────────────────────────╮
-│                 NETMASH                  │
-│         Connect. Discover. Chat.         │
-╰──────────────────────────────────────────╯
-
-Searching for NetMash host on local network...
-
-✓ NetMash host discovered: SHAIK-PC
-Connecting...
-✓ Connected.
-
-────────────────── NetMash | GENERAL ──────────────────
-You are: ALI-PC (ALI-PC)
-Type a message to chat, or /help for available commands.
-
-[14:05] SHAIK-PC:
-Hello everyone!
-
-netmash> Hello Shaik!
-```
-
----
-
-## 6. CLI Commands Reference
+## 4. CLI Commands Reference
 
 ```bash
 # Start NetMash interactive session (auto-discover or host)
@@ -179,12 +158,12 @@ netmash peers
 netmash --host-only
 
 # Check for updates on GitHub without installing
-netmash --check-update
 netmash update --check
+netmash --check-update
 
-# Download and apply the latest update automatically
-netmash --update
+# Automatically download and install latest update from GitHub
 netmash update
+netmash --update
 
 # Custom TCP port or discovery port
 netmash --port 9000 --discovery-port 9001
@@ -195,14 +174,14 @@ netmash --no-color
 
 ---
 
-## 7. Automatic Updates & Upgrades
+## 5. Automatic Updates & Self-Updater
 
-NetMash includes a self-updater that connects directly to the GitHub repository to check for new features, bug fixes, and code updates:
+NetMash includes a self-updater that connects directly to the GitHub repository to keep your installation up to date:
 
 ### Automatic Notification
-Whenever you start `netmash`, it checks GitHub in the background. If a newer commit or release is available, a notification is displayed:
+Whenever you start `netmash`, it checks GitHub in the background. If a newer commit is available, a notification is displayed:
 ```text
-💡 A new update is available: 21486b0 — feat: strict room isolation and PIN options
+💡 A new update is available: d57253a — feat: add automatic update checking and self-updater feature
    Run 'netmash update' or type /update in chat to apply.
 ```
 
@@ -216,12 +195,12 @@ netmash update
 ```
 
 ### Inside Interactive Chat
-- Type `/update` to check and install the latest updates without leaving your terminal.
-- Type `/check-update` to view the latest commit and release status.
+- Type **`/update`** to check and install the latest updates without leaving your terminal.
+- Type **`/check-update`** to view the latest commit and release status.
 
 ---
 
-## 7. Group & PIN Management
+## 6. Group & PIN Management
 
 ### Strict Room Isolation
 
@@ -291,52 +270,7 @@ netmash group info developers
 
 ---
 
-## 8. Group & PIN Management
-
-### Strict Room Isolation
-
-When you are in a specific room (such as a private group `security`), all conversations in that room are strictly isolated:
-- You will **only** receive and send messages in your active room.
-- You will **not** receive chats sent in `GENERAL` or any other group.
-- Users in `GENERAL` or other groups cannot view your group messages.
-- You can switch between groups or return to `GENERAL` at any time with `/switch` or `/general`.
-
-### From the CLI
-
-```bash
-# List available groups
-netmash group list
-netmash -g -l
-
-# Create a public group
-netmash group create developers
-
-# Create a PIN-protected group (prompts interactively for 4-digit PIN)
-netmash group create security --pin
-
-# Create a PIN-protected group with direct PIN
-netmash group create security --pin 1234
-
-# Join a group directly
-netmash group join developers
-netmash group join security --pin 1234
-
-# Change or set a PIN (group owner only)
-netmash group set-pin security 5678
-
-# Remove PIN protection (group owner only)
-netmash group remove-pin security
-
-# Leave a group
-netmash group leave developers
-
-# View group details
-netmash group info developers
-```
-
----
-
-## 9. Security Model
+## 7. Security Model
 
 1. **PIN Security**:
    - Stored using `hashlib.scrypt` with a 16-byte cryptographically secure random salt.
@@ -354,11 +288,10 @@ netmash group info developers
 
 ---
 
-## 10. Platform-Specific Guides
+## 8. Platform-Specific Guides
 
 ### Windows (10/11)
 
-Install using Python 3.10+:
 ```powershell
 git clone https://github.com/Shadab-2604/netmash.git
 cd netmash
@@ -366,7 +299,7 @@ python -m pip install .
 netmash
 ```
 
-*Note*: If `netmash` command is not recognized, ensure Python Scripts directory (e.g. `%LOCALAPPDATA%\Programs\Python\Python31x\Scripts` or `%APPDATA%\Python\Python31x\Scripts`) is in your system `PATH`. Alternatively, run `python -m netmash`.
+*Note*: If `netmash` command is not recognized, ensure Python Scripts directory is in your system `PATH`, or run `python -m netmash`.
 
 ### Linux & Ubuntu
 
@@ -397,7 +330,7 @@ netmash
 
 ---
 
-## 11. Troubleshooting
+## 9. Troubleshooting
 
 ### "No NetMash host found"
 1. Verify both devices are connected to the same Wi-Fi router / subnet.
@@ -413,7 +346,7 @@ netmash --port 9000 --discovery-port 9001
 
 ---
 
-## 12. Testing
+## 10. Testing
 
 Run the automated test suite:
 
@@ -425,14 +358,6 @@ All 24 test suites cover identity generation, protocol framing, message sanitiza
 
 ---
 
-## 13. Roadmap
-
-- [x] V1: Host/Client architecture, UDP Multicast/Broadcast auto-discovery, General chat, PIN-protected groups, DMs, Peer listing, Status & Info, Terminal escape sanitization, Scrypt PIN hashing, Automatic update checking and self-updates.
-- [ ] V2: Host failover, Transport Layer Security (TLS), P2P and direct file transfer protocol (`file_offer`, `file_chunk`, `file_complete`), Group owner moderation tools (kick/ban).
-- [ ] V3: End-to-end encrypted groups, Voice communication over local network, LAN game lobby integration.
-
----
-
-## 14. License
+## 11. License
 
 Distributed under the [MIT License](LICENSE).
