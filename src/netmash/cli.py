@@ -141,9 +141,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Automatically download and apply the latest update from GitHub.",
     )
+    parser.add_argument(
+        "--restart",
+        dest="restart_flag",
+        action="store_true",
+        help="Restart NetMash session.",
+    )
 
     # Subcommands
     subparsers = parser.add_subparsers(dest="subcommand", help="Subcommands")
+
+    # restart subcommand
+    subparsers.add_parser("restart", help="Restart NetMash session")
 
     # update subcommand
     update_p = subparsers.add_parser("update", help="Check and apply NetMash updates from GitHub")
@@ -298,6 +307,15 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
         else:
             print(red(f"\n✗ Update failed:\n{msg}"))
         return True
+
+    # Handle restart CLI flag or subcommand
+    is_restart_cmd = getattr(args, "restart_flag", False) or getattr(args, "subcommand", None) == "restart"
+    if is_restart_cmd:
+        print(cyan("Restarting NetMash session..."))
+        # Clear args related to restart and proceed directly to interactive launch
+        args.restart_flag = False
+        args.subcommand = None
+        return False
 
     # 1. Local info request (-i / --info) without connecting
     if args.info:

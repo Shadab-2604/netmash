@@ -96,3 +96,11 @@ def test_cli_parser_subcommands():
     # --update
     args = parser.parse_args(["--update"])
     assert args.update_flag is True
+
+    # --restart
+    args = parser.parse_args(["--restart"])
+    assert args.restart_flag is True
+
+    # restart subcommand
+    args = parser.parse_args(["restart"])
+    assert args.subcommand == "restart"
