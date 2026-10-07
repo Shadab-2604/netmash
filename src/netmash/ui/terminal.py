@@ -20,6 +20,7 @@ from netmash.ui.colors import (
     dim,
     gray,
     green,
+    magenta,
     red,
     yellow,
 )
@@ -355,7 +356,3 @@ async def run_interactive_chat(client: NetMashClient) -> None:
             print(red(f"\nUnexpected input error: {e}"))
             break
 
-
-def magenta(text: str) -> str:
-    from netmash.ui.colors import _COLOR_ENABLED, Colors
-    return f"{Colors.MAGENTA}{text}{Colors.RESET}" if _COLOR_ENABLED else text

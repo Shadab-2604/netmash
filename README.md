@@ -67,20 +67,23 @@ When you run `netmash`, it automatically searches your reachable Wi-Fi or Ethern
 
 ---
 
-## 4. Installation
+## 4. Installation & Setup
 
-### From Source
+### Option 1: Standard Installation
 
 ```bash
-git clone https://github.com/your-username/NetMash.git
-cd NetMash
+git clone https://github.com/Shadab-2604/netmash.git
+cd netmash
 pip install .
 ```
 
-### Editable Development Installation
+### Option 2: Development & Testing Setup
 
 ```bash
-pip install -e ".[test]"
+git clone https://github.com/Shadab-2604/netmash.git
+cd netmash
+pip install -r requirements.txt
+pip install -e .
 ```
 
 ---
@@ -253,8 +256,8 @@ netmash group info developers
 
 Install using Python 3.10+:
 ```powershell
-git clone https://github.com/your-username/NetMash.git
-cd NetMash
+git clone https://github.com/Shadab-2604/netmash.git
+cd netmash
 python -m pip install .
 netmash
 ```
@@ -265,8 +268,8 @@ netmash
 
 ```bash
 sudo apt update && sudo apt install -y python3 python3-pip git
-git clone https://github.com/your-username/NetMash.git
-cd NetMash
+git clone https://github.com/Shadab-2604/netmash.git
+cd netmash
 pip install .
 netmash
 ```
@@ -282,8 +285,8 @@ In WSL2, networking defaults to NAT mode which may isolate UDP multicast/broadca
 ```bash
 pkg update
 pkg install -y python git
-git clone https://github.com/your-username/NetMash.git
-cd NetMash
+git clone https://github.com/Shadab-2604/netmash.git
+cd netmash
 pip install .
 netmash
 ```

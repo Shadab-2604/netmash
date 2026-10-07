@@ -100,3 +100,8 @@ def dim(text: str) -> str:
 
 def bright_cyan(text: str) -> str:
     return f"{Colors.BRIGHT_CYAN}{text}{Colors.RESET}" if _COLOR_ENABLED else text
+
+
+def magenta(text: str) -> str:
+    return f"{Colors.MAGENTA}{text}{Colors.RESET}" if _COLOR_ENABLED else text
+
