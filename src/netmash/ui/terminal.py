@@ -24,6 +24,7 @@ from netmash.ui.colors import (
     red,
     yellow,
 )
+from netmash.updater import apply_update_async, check_for_updates_async
 from netmash.utils.security import sanitize_terminal_text
 
 
@@ -134,6 +135,8 @@ def print_help() -> None:
     print(f"  {cyan('/dm <user> [msg]')}         Direct message a peer")
     print(f"  {cyan('/room')}                    Show current active room")
     print(f"  {cyan('/name <new_name>')}         Change your display name")
+    print(f"  {cyan('/update')}                  Check and install latest update from GitHub")
+    print(f"  {cyan('/check-update')}            Check for updates without installing")
     print(f"  {cyan('/info')}                    Show local node and network info")
     print(f"  {cyan('/status')}                  Show server status")
     print(f"  {cyan('/clear')}                   Clear terminal screen")
@@ -411,6 +414,36 @@ async def run_interactive_chat(client: NetMashClient) -> None:
                     status = await client.get_status()
                     if status:
                         render_status(status)
+                elif cmd in ("/update-check", "/check-update", "/checkupdate"):
+                    print(cyan("Checking GitHub for the latest NetMash updates..."))
+                    up_info = await check_for_updates_async()
+                    if up_info.get("error"):
+                        print(red(f"Error checking for updates: {up_info['error']}"))
+                    else:
+                        cur = up_info.get("current_commit") or "installed"
+                        latest = up_info.get("latest_commit") or "latest"
+                        msg = up_info.get("commit_message") or ""
+                        print(f"Current commit:  {cyan(cur)}")
+                        print(f"Latest on GitHub: {green(latest)} ({msg})")
+                        if up_info.get("update_available"):
+                            print(yellow("\n💡 A new update is available! Type /update to apply now."))
+                        else:
+                            print(green("\n✓ NetMash is already up to date!"))
+                elif cmd == "/update":
+                    print(cyan("Checking GitHub for updates..."))
+                    up_info = await check_for_updates_async()
+                    if not up_info.get("error") and not up_info.get("update_available"):
+                        cur = up_info.get("current_commit") or "installed"
+                        print(green(f"✓ NetMash is already up to date! (Commit: {cur})"))
+                        continue
+
+                    print(cyan("Downloading and applying update from GitHub..."))
+                    success, update_msg = await apply_update_async()
+                    if success:
+                        print(green(f"✓ {update_msg}"))
+                        print(yellow("Please restart NetMash to apply the updated version."))
+                    else:
+                        print(red(f"✗ Update failed:\n{update_msg}"))
                 elif cmd == "/clear":
                     clear_screen()
                     print_banner()

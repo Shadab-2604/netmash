@@ -78,3 +78,21 @@ def test_cli_parser_subcommands():
     assert args.subcommand == "dm"
     assert args.target_user == "Shadab"
     assert args.message == "Hello there"
+
+    # update
+    args = parser.parse_args(["update"])
+    assert args.subcommand == "update"
+    assert args.update_check is False
+
+    # update --check
+    args = parser.parse_args(["update", "--check"])
+    assert args.subcommand == "update"
+    assert args.update_check is True
+
+    # --check-update
+    args = parser.parse_args(["--check-update"])
+    assert args.check_update is True
+
+    # --update
+    args = parser.parse_args(["--update"])
+    assert args.update_flag is True

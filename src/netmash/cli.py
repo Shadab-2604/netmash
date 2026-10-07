@@ -40,6 +40,11 @@ from netmash.ui.terminal import (
     render_status,
     run_interactive_chat,
 )
+from netmash.updater import (
+    apply_update,
+    check_for_updates,
+    check_for_updates_async,
+)
 from netmash.utils.network import get_platform_info
 
 
@@ -124,8 +129,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Join a specific group directly.",
     )
 
+    parser.add_argument(
+        "--check-update",
+        action="store_true",
+        help="Check GitHub for the latest updates to NetMash.",
+    )
+    parser.add_argument(
+        "--update",
+        dest="update_flag",
+        action="store_true",
+        help="Automatically download and apply the latest update from GitHub.",
+    )
+
     # Subcommands
     subparsers = parser.add_subparsers(dest="subcommand", help="Subcommands")
+
+    # update subcommand
+    update_p = subparsers.add_parser("update", help="Check and apply NetMash updates from GitHub")
+    update_p.add_argument(
+        "--check",
+        dest="update_check",
+        action="store_true",
+        help="Check for updates without installing them",
+    )
 
     # group subcommand
     group_parser = subparsers.add_parser("group", help="Manage groups")
@@ -223,6 +249,55 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
     Handles one-shot commands like -i, -s, -n, group list, etc.
     Returns True if handled, False if standard interactive mode should proceed.
     """
+    # 0. Update commands (--check-update, --update, netmash update [--check])
+    is_update_check = getattr(args, "check_update", False) or (
+        getattr(args, "subcommand", None) == "update"
+        and getattr(args, "update_check", False)
+    )
+    is_update_apply = getattr(args, "update_flag", False) or (
+        getattr(args, "subcommand", None) == "update"
+        and not getattr(args, "update_check", False)
+    )
+
+    if is_update_check:
+        print("Checking GitHub for the latest NetMash updates...")
+        info = await check_for_updates_async()
+        if info.get("error"):
+            print(red(f"Error checking for updates: {info['error']}"))
+        else:
+            cur = info.get("current_commit") or "installed"
+            latest = info.get("latest_commit") or "latest"
+            msg = info.get("commit_message") or ""
+            date = info.get("commit_date") or ""
+            print(f"\nCurrent version: {cyan(__version__)} (Commit: {cyan(cur)})")
+            print(f"Latest on GitHub: {green(latest)} ({msg})")
+            if date:
+                print(f"Commit date:     {dim(date)}")
+
+            if info.get("update_available"):
+                print(yellow("\n💡 A new update is available!"))
+                print(dim("Run the following command to update:\n  netmash update\n"))
+            else:
+                print(green("\n✓ NetMash is already up to date!"))
+        return True
+
+    if is_update_apply:
+        print("Checking GitHub for updates...")
+        info = await check_for_updates_async()
+        if not info.get("error") and not info.get("update_available"):
+            cur = info.get("current_commit") or "latest"
+            print(green(f"✓ NetMash is already up to date! (Commit: {cur})"))
+            return True
+
+        print(cyan("Applying latest update from GitHub (https://github.com/Shadab-2604/netmash.git)..."))
+        success, msg = await apply_update_async()
+        if success:
+            print(green(f"\n✓ {msg}"))
+            print(green("Restart NetMash to use the updated version."))
+        else:
+            print(red(f"\n✗ Update failed:\n{msg}"))
+        return True
+
     # 1. Local info request (-i / --info) without connecting
     if args.info:
         platform_info = get_platform_info()

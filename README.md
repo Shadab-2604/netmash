@@ -178,12 +178,46 @@ netmash peers
 # Run as dedicated background host (non-interactive)
 netmash --host-only
 
+# Check for updates on GitHub without installing
+netmash --check-update
+netmash update --check
+
+# Download and apply the latest update automatically
+netmash --update
+netmash update
+
 # Custom TCP port or discovery port
 netmash --port 9000 --discovery-port 9001
 
 # Disable colors (also respects NO_COLOR env var)
 netmash --no-color
 ```
+
+---
+
+## 7. Automatic Updates & Upgrades
+
+NetMash includes a self-updater that connects directly to the GitHub repository to check for new features, bug fixes, and code updates:
+
+### Automatic Notification
+Whenever you start `netmash`, it checks GitHub in the background. If a newer commit or release is available, a notification is displayed:
+```text
+💡 A new update is available: 21486b0 — feat: strict room isolation and PIN options
+   Run 'netmash update' or type /update in chat to apply.
+```
+
+### From the Terminal
+```bash
+# Check if an update is available
+netmash update --check
+
+# Apply latest update automatically
+netmash update
+```
+
+### Inside Interactive Chat
+- Type `/update` to check and install the latest updates without leaving your terminal.
+- Type `/check-update` to view the latest commit and release status.
 
 ---
 
@@ -247,15 +281,51 @@ netmash group info developers
 /dm <user> [msg]         Send a direct message
 /room                    Show current active room name
 /name <new_name>         Change your display name
+/update                  Check and install latest update from GitHub
+/check-update            Check for updates without installing
 /info                    Display network and node info
 /status                  Display server uptime and metrics
 /clear                   Clear terminal screen
 /exit, /quit             Disconnect and exit
-```eate security --pin
+```
+
+---
+
+## 8. Group & PIN Management
+
+### Strict Room Isolation
+
+When you are in a specific room (such as a private group `security`), all conversations in that room are strictly isolated:
+- You will **only** receive and send messages in your active room.
+- You will **not** receive chats sent in `GENERAL` or any other group.
+- Users in `GENERAL` or other groups cannot view your group messages.
+- You can switch between groups or return to `GENERAL` at any time with `/switch` or `/general`.
+
+### From the CLI
+
+```bash
+# List available groups
+netmash group list
+netmash -g -l
+
+# Create a public group
+netmash group create developers
+
+# Create a PIN-protected group (prompts interactively for 4-digit PIN)
+netmash group create security --pin
+
+# Create a PIN-protected group with direct PIN
+netmash group create security --pin 1234
 
 # Join a group directly
 netmash group join developers
-netmash -j developers
+netmash group join security --pin 1234
+
+# Change or set a PIN (group owner only)
+netmash group set-pin security 5678
+
+# Remove PIN protection (group owner only)
+netmash group remove-pin security
 
 # Leave a group
 netmash group leave developers
@@ -264,27 +334,9 @@ netmash group leave developers
 netmash group info developers
 ```
 
-### Inside Interactive Chat
-
-```text
-/help                 Show help commands
-/users, /peers        List online peers
-/groups               List available groups
-/create <name>        Create public or PIN-protected group
-/join <name>          Join or switch to a group room (prompts for PIN if protected)
-/leave                Leave current group and return to GENERAL
-/dm <user> [msg]      Send a direct message
-/room                 Show current room name
-/name <new_name>      Change your display name
-/info                 Display network and node info
-/status               Display server uptime and metrics
-/clear                Clear terminal screen
-/exit, /quit          Disconnect and exit
-```
-
 ---
 
-## 8. Security Model
+## 9. Security Model
 
 1. **PIN Security**:
    - Stored using `hashlib.scrypt` with a 16-byte cryptographically secure random salt.
@@ -302,7 +354,7 @@ netmash group info developers
 
 ---
 
-## 9. Platform-Specific Guides
+## 10. Platform-Specific Guides
 
 ### Windows (10/11)
 
@@ -345,7 +397,7 @@ netmash
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### "No NetMash host found"
 1. Verify both devices are connected to the same Wi-Fi router / subnet.
@@ -361,7 +413,7 @@ netmash --port 9000 --discovery-port 9001
 
 ---
 
-## 11. Testing
+## 12. Testing
 
 Run the automated test suite:
 
@@ -369,18 +421,18 @@ Run the automated test suite:
 python -m pytest -v
 ```
 
-All 21 test suites cover identity generation, protocol framing, message sanitization, scrypt PIN verification, group access control, database storage, and end-to-end asynchronous server-client interaction.
+All 24 test suites cover identity generation, protocol framing, message sanitization, scrypt PIN verification, group access control, database storage, self-updater checks, and end-to-end asynchronous server-client interaction.
 
 ---
 
-## 12. Roadmap
+## 13. Roadmap
 
-- [x] V1: Host/Client architecture, UDP Multicast/Broadcast auto-discovery, General chat, PIN-protected groups, DMs, Peer listing, Status & Info, Terminal escape sanitization, Scrypt PIN hashing.
+- [x] V1: Host/Client architecture, UDP Multicast/Broadcast auto-discovery, General chat, PIN-protected groups, DMs, Peer listing, Status & Info, Terminal escape sanitization, Scrypt PIN hashing, Automatic update checking and self-updates.
 - [ ] V2: Host failover, Transport Layer Security (TLS), P2P and direct file transfer protocol (`file_offer`, `file_chunk`, `file_complete`), Group owner moderation tools (kick/ban).
 - [ ] V3: End-to-end encrypted groups, Voice communication over local network, LAN game lobby integration.
 
 ---
 
-## 13. License
+## 14. License
 
 Distributed under the [MIT License](LICENSE).
