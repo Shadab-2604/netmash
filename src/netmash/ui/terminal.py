@@ -68,8 +68,10 @@ def render_peers_table(peers: List[Dict[str, Any]]) -> None:
     print()
 
 
-def render_groups_table(groups: List[Dict[str, Any]]) -> None:
-    """Renders the formatted list of available groups."""
+def render_groups_table(
+    groups: List[Dict[str, Any]], current_room: Optional[str] = None
+) -> None:
+    """Renders the formatted list of available groups. Star indicates the current active room."""
     print(bold("\nAvailable Groups\n"))
     print(f"{bold('NAME'):<20} {bold('MEMBERS'):<12} {bold('ACCESS')}")
     print(gray("─" * 42))
@@ -79,11 +81,20 @@ def render_groups_table(groups: List[Dict[str, Any]]) -> None:
         return
 
     for g in groups:
-        name = sanitize_terminal_text(g.get("name", ""))[:18]
+        raw_name = g.get("name", "")
+        name = sanitize_terminal_text(raw_name)[:18]
         members = str(g.get("members", 0))
         access = g.get("access", "PUBLIC")
         access_str = yellow("PIN") if access == "PIN" else green("PUBLIC")
-        mem_flag = bright_cyan(" *") if g.get("is_member") else ""
+
+        # The star (*) strictly ONLY shows for the single room the user is currently inside
+        is_inside = False
+        if current_room:
+            is_inside = raw_name.lower() == current_room.lower()
+        elif g.get("is_inside") or g.get("is_active"):
+            is_inside = True
+
+        mem_flag = bright_cyan(" *") if is_inside else ""
         print(f"{name + mem_flag:<20} {members:<12} {access_str}")
     print()
 
@@ -262,7 +273,7 @@ async def run_interactive_chat(client: NetMashClient) -> None:
                     render_peers_table(peers)
                 elif cmd == "/groups":
                     groups = await client.list_groups()
-                    render_groups_table(groups)
+                    render_groups_table(groups, current_room=client.current_room)
                 elif cmd in ("/create", "/creategroup"):
                     if not cmd_args:
                         print(red("Usage: /create <group_name> [4-digit-pin]"))

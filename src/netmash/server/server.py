@@ -427,6 +427,10 @@ class NetMashServer:
 
     async def _handle_group_list(self, session: ClientSession) -> None:
         groups = self.group_manager.list_groups(querying_node_id=session.node_id)
+        # Mark strictly which room the user is actively inside
+        for g in groups:
+            g["is_inside"] = (g["name"].lower() == session.active_room.lower())
+            g["is_active"] = (g["name"].lower() == session.active_room.lower())
         resp = NetMashMessage(
             type=MessageType.GROUP_LIST_RESPONSE,
             payload={"groups": groups},

@@ -440,7 +440,7 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
             else:
                 # Default group list (-g, -g -l, group list)
                 groups = await client.list_groups()
-                render_groups_table(groups)
+                render_groups_table(groups, current_room=client.current_room)
 
     finally:
         await client.disconnect()
