@@ -42,12 +42,14 @@ from netmash.ui.terminal import (
     render_peers_table,
     render_stats,
     render_status,
+    render_version_info,
     render_whoami,
     run_interactive_chat,
 )
 from netmash.updater import (
     apply_update_async,
     check_for_updates_async,
+    render_version_diagnostics,
 )
 from netmash.utils.diagnostics import run_diagnostics
 from netmash.utils.network import get_local_ip, get_platform_info
@@ -190,6 +192,9 @@ def build_parser() -> argparse.ArgumentParser:
     # restart subcommand
     subparsers.add_parser("restart", help="Restart NetMash session")
 
+    # version subcommand
+    subparsers.add_parser("version", help="Show complete version and runtime information")
+
     # update subcommand
     update_p = subparsers.add_parser("update", help="Check and apply NetMash updates from GitHub")
     update_p.add_argument(
@@ -323,6 +328,11 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
     Handles one-shot commands like -i, -s, -n, --diagnose, --whoami, etc.
     Returns True if handled, False if standard interactive mode should proceed.
     """
+    # -1. Version subcommand
+    if getattr(args, "subcommand", None) == "version":
+        render_version_info()
+        return True
+
     # 0. Update commands
     is_update_check = getattr(args, "check_update", False) or (
         getattr(args, "subcommand", None) == "update"
@@ -339,37 +349,50 @@ async def handle_oneshot_command(args: argparse.Namespace) -> bool:
         if info.get("error"):
             print(red(f"Error checking for updates: {info['error']}"))
         else:
-            cur = info.get("current_commit") or "installed"
-            latest = info.get("latest_commit") or "latest"
+            running_c = info.get("running_commit") or "unknown"
+            running_v = info.get("running_version") or __version__
+            latest_c = info.get("latest_commit") or "unknown"
+            latest_v = info.get("latest_version") or running_v
             msg = info.get("commit_message") or ""
             date = info.get("commit_date") or ""
-            print(f"\nCurrent version: {cyan(__version__)} (Commit: {cyan(cur)})")
-            print(f"Latest on GitHub: {green(latest)} ({msg})")
-            if date:
-                print(f"Commit date:     {dim(date)}")
 
-            if info.get("update_available"):
+            print(f"\n{'Running version':<18}: {cyan(running_v)} ({running_c})")
+            print(f"{'Latest on GitHub':<18}: {cyan(latest_v)} ({latest_c})")
+            if msg:
+                print(f"{'Latest commit':<18}: {msg}")
+            if date:
+                print(f"{'Commit date':<18}: {dim(date)}")
+
+            if info.get("restart_required"):
+                print(yellow("\n⚠ Update is installed on disk, but the current process has not restarted."))
+                print(dim("  Use netmash restart to apply the update.\n"))
+            elif info.get("update_available"):
                 print(yellow("\n💡 A new update is available!"))
-                print(dim("Run the following command to update:\n  netmash update\n"))
+                print(dim("  Run: netmash update\n"))
             else:
-                print(green("\n✓ NetMash is already up to date!"))
+                print(green("\n✓ NetMash is up to date!\n"))
         return True
 
     if is_update_apply:
-        print("Checking GitHub for updates...")
+        print("Checking update status...")
         info = await check_for_updates_async()
-        if not info.get("error") and not info.get("update_available"):
-            cur = info.get("current_commit") or "latest"
-            print(green(f"✓ NetMash is already up to date! (Commit: {cur})"))
+        if not info.get("error") and not info.get("update_available") and not info.get("restart_required"):
+            cur = info.get("installed_commit") or info.get("running_commit") or "latest"
+            print(green(f"\n✓ NetMash is already up to date! (Commit: {cur})\n"))
+            return True
+
+        if info.get("restart_required") and not info.get("update_available"):
+            print(yellow("\n⚠ Update is already installed. Restart is required."))
+            print(dim("  Run: netmash restart\n"))
             return True
 
         print(cyan("Applying latest update from GitHub (https://github.com/Shadab-2604/netmash.git)..."))
         success, msg = await apply_update_async()
         if success:
             print(green(f"\n✓ {msg}"))
-            print(green("Restart NetMash to use the updated version."))
+            print(green("Restart NetMash to use the updated version.\n"))
         else:
-            print(red(f"\n✗ Update failed:\n{msg}"))
+            print(red(f"\n✗ Update failed:\n{msg}\n"))
         return True
 
     # 1. Diagnostics command (--diagnose / diagnose)

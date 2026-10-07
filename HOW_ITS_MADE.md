@@ -611,9 +611,9 @@ Comprehensive test suite in `tests/`:
 - `tests/test_cli.py`: CLI arguments, subcommands, and flags (3 tests).
 - `tests/test_database.py`: Database tables, migrations, indexes (1 test).
 - `tests/test_discovery.py`: UDP discovery responder and probes (1 test).
-- `tests/test_updater.py`: Git commit resolution and updater APIs (3 tests).
+- `tests/test_updater.py`: Git commit resolution, pip metadata verification, version diagnostics, and updater APIs (8 tests).
 
-Total: **69 passing tests** executed in automated test runner.
+Total: **74 passing tests** executed in automated test runner.
 
 Run tests:
 ```bash

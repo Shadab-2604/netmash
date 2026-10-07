@@ -45,7 +45,11 @@ from netmash.ui.theme import (
     set_active_theme,
     set_random_theme,
 )
-from netmash.updater import apply_update_async, check_for_updates_async
+from netmash.updater import (
+    apply_update_async,
+    check_for_updates_async,
+    render_version_diagnostics,
+)
 from netmash.ui.input import TerminalInputManager
 from netmash.utils.diagnostics import run_diagnostics
 from netmash.utils.file_transfer import (
@@ -643,6 +647,29 @@ def render_admin_config(cfg: Dict[str, Any]) -> None:
     for k, v in cfg.items():
         print(f"{k:<22}: {v}")
     print()
+
+
+def render_version_info() -> None:
+    """Renders comprehensive NetMash runtime and installation version diagnostics."""
+    t = get_active_theme()
+    diag = render_version_diagnostics()
+    print(t.bold("\nNetMash Information"))
+    print(t.border("──────────────────────────────────────────────────"))
+    print(f"{'Running Version':<20}: {t.accent(diag['running_version'])}")
+    print(f"{'Running Commit':<20}: {t.accent(diag['running_commit'])}")
+    print(f"{'Installed Version':<20}: {t.accent(diag['installed_version'])}")
+    print(f"{'Installed Commit':<20}: {t.accent(diag['installed_commit'])}")
+    print(f"{'Python Executable':<20}: {diag['python_executable']}")
+    print(f"{'Python Version':<20}: {diag['python_version']}")
+    print(f"{'Platform':<20}: {diag['platform']}")
+    print(f"{'Repository':<20}: {diag['repository']}")
+    print(f"{'Installation':<20}: {diag['install_path']}")
+
+    if diag.get("restart_pending"):
+        print(t.warning("\n⚠ An update is installed on disk, but this running process is older."))
+        print(t.dim("  Run /restart to load the updated version.\n"))
+    else:
+        print()
 
 
 def render_theme_list() -> None:
@@ -1649,10 +1676,7 @@ async def run_interactive_chat(
                         diag_res = await run_diagnostics(client=client)
                         render_diagnostics(diag_res)
                     elif cmd == "/version":
-                        print(bold("\nNetMash\n"))
-                        print(f"{'Version':<12}: {green(__version__)}")
-                        print(f"{'Python':<12}: {sys.version.split(' ')[0]}")
-                        print(f"{'Platform':<12}: {sys.platform}\n")
+                        render_version_info()
                     elif cmd == "/netinfo":
                         local_ip = get_local_ip()
                         peers = await client.list_peers()
@@ -1719,37 +1743,57 @@ async def run_interactive_chat(
                         if status:
                             render_status(status)
                     elif cmd in ("/update-check", "/check-update", "/checkupdate"):
-                        print(cyan("Checking GitHub for the latest NetMash updates..."))
+                        t = get_active_theme()
+                        print(t.dim("Checking GitHub for the latest NetMash updates..."))
                         up_info = await check_for_updates_async()
                         if up_info.get("error"):
-                            print(red(f"Error checking for updates: {up_info['error']}"))
+                            print(t.error(f"Error checking for updates: {up_info['error']}"))
                         else:
-                            cur = up_info.get("current_commit") or "installed"
-                            latest = up_info.get("latest_commit") or "latest"
+                            running_c = up_info.get("running_commit") or "unknown"
+                            running_v = up_info.get("running_version") or __version__
+                            latest_c = up_info.get("latest_commit") or "unknown"
+                            latest_v = up_info.get("latest_version") or running_v
                             msg = up_info.get("commit_message") or ""
-                            print(f"Current commit:  {cyan(cur)}")
-                            print(f"Latest on GitHub: {green(latest)} ({msg})")
-                            if up_info.get("update_available"):
-                                print(yellow("\n💡 A new update is available! Type /update to apply now."))
+                            date = up_info.get("commit_date") or ""
+
+                            print(f"\n{'Running version':<18}: {t.accent(running_v)} ({running_c})")
+                            print(f"{'Latest on GitHub':<18}: {t.accent(latest_v)} ({latest_c})")
+                            if msg:
+                                print(f"{'Latest commit':<18}: {msg}")
+                            if date:
+                                print(f"{'Commit date':<18}: {t.dim(date)}")
+
+                            if up_info.get("restart_required"):
+                                print(t.warning("\n⚠ Update is installed on disk, but the current process has not restarted."))
+                                print(t.dim("  Use /restart to apply the update.\n"))
+                            elif up_info.get("update_available"):
+                                print(t.warning("\n💡 A new update is available!"))
+                                print(t.dim("  Type /update to download and apply it.\n"))
                             else:
-                                print(green("\n✓ NetMash is already up to date!"))
+                                print(t.success("\n✓ NetMash is up to date.\n"))
                     elif cmd == "/update":
-                        print(cyan("Checking GitHub for updates..."))
+                        t = get_active_theme()
+                        print(t.dim("Checking update status..."))
                         up_info = await check_for_updates_async()
-                        if not up_info.get("error") and not up_info.get("update_available"):
-                            cur = up_info.get("current_commit") or "installed"
-                            print(green(f"✓ NetMash is already up to date! (Commit: {cur})"))
+                        if not up_info.get("error") and not up_info.get("update_available") and not up_info.get("restart_required"):
+                            cur = up_info.get("installed_commit") or up_info.get("running_commit") or "latest"
+                            print(t.success(f"\n✓ NetMash is already up to date. (Commit: {cur})\n"))
                             continue
 
-                        print(cyan("Downloading and applying update from GitHub..."))
+                        if up_info.get("restart_required") and not up_info.get("update_available"):
+                            print(t.warning("\n⚠ Update is already installed. Restart is required."))
+                            print(t.dim("  Use /restart to load the new version.\n"))
+                            continue
+
+                        print(t.accent("\nDownloading and installing latest update from GitHub..."))
                         success, update_msg = await apply_update_async()
                         if success:
-                            print(green(f"✓ {update_msg}"))
-                            print(yellow("Please type /restart to apply the updated version."))
+                            print(t.success(f"\n✓ {update_msg}\n"))
                         else:
-                            print(red(f"✗ Update failed:\n{update_msg}"))
+                            print(t.error(f"\n✗ Update failed:\n{update_msg}\n"))
                     elif cmd in ("/restart", "/reload"):
-                        print(cyan("\nRestarting NetMash session..."))
+                        t = get_active_theme()
+                        print(t.dim("\nRestarting NetMash session..."))
                         try:
                             await client.disconnect()
                             if server:
@@ -1757,7 +1801,11 @@ async def run_interactive_chat(
                         except Exception:
                             pass
                         _save_readline_history(history_file)
-                        os.execv(sys.executable, [sys.executable] + sys.argv)
+                        if sys.platform == "win32":
+                            subprocess.Popen([sys.executable] + sys.argv)
+                            sys.exit(0)
+                        else:
+                            os.execv(sys.executable, [sys.executable] + sys.argv)
                     elif cmd == "/clear":
                         redraw_screen(client=client, input_manager=input_manager)
                     else:
